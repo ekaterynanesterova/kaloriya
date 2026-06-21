@@ -161,7 +161,7 @@
   /* OVERLAYS */
   .overlay { position:fixed; inset:0; background:rgba(4,6,8,.94); display:none; align-items:center; justify-content:center; z-index:500; flex-direction:column; padding:20px; }
   .overlay.show { display:flex; }
-  .overlay-box { width:100%; max-width:480px; border:1px solid var(--cyan); background:var(--panel); padding:18px; box-shadow:0 0 30px rgba(0,255,224,.15); }
+  .overlay-box { width:100%; max-width:480px; max-height:88vh; overflow-y:auto; border:1px solid var(--cyan); background:var(--panel); padding:18px; box-shadow:0 0 30px rgba(0,255,224,.15); }
   .overlay-title { font-size:.65rem; letter-spacing:.18em; text-transform:uppercase; color:var(--cyan); text-shadow:0 0 8px rgba(0,255,224,.4); margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
   .overlay-close { cursor:pointer; color:var(--text-dim); font-size:1rem; }
   .overlay-close:hover { color:var(--magenta); }
@@ -185,6 +185,9 @@
   .review-unit { width:64px; }
   .assumed-badge { font-size:.55rem; letter-spacing:.06em; padding:2px 6px; border:1px solid rgba(255,210,74,.35); background:var(--yellow-dim); color:var(--yellow); text-transform:uppercase; white-space:nowrap; }
   .review-macros { font-size:.64rem; color:var(--text-dim); margin-left:auto; }
+  .dish-total { margin-top:10px; padding:10px 12px; border:1px solid rgba(0,255,224,.3); background:var(--cyan-dim); font-size:.78rem; color:var(--text); }
+  .dish-total:empty { display:none; }
+  .dish-total b { font-family:'Orbitron',monospace; color:var(--cyan); font-size:1.05rem; text-shadow:0 0 8px rgba(0,255,224,.4); }
 
   @keyframes fadeDown { from{opacity:0;transform:translateY(-12px)} to{opacity:1;transform:translateY(0)} }
   @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
@@ -380,26 +383,27 @@
   </div>
 </div>
 
-<!-- МОИ БЛЮДА: создание / редактирование -->
+<!-- МОИ БЛЮДА: создание / редактирование из ингредиентов -->
 <div class="overlay" id="dishOverlay">
-  <div class="overlay-box" style="max-width:520px">
+  <div class="overlay-box" style="max-width:560px">
     <div class="overlay-title"><span id="dishFormTitle">// НОВОЕ БЛЮДО</span><span class="overlay-close" onclick="closeDishForm()">✕ закрыть</span></div>
     <input type="hidden" id="dishId">
-    <input class="inp" id="dishName" placeholder="название блюда (напр. Бутерброд с сыром)" style="width:100%;margin-bottom:8px">
-    <div class="input-row" style="margin-bottom:8px">
-      <input class="inp" id="dishAmount" type="number" min="0" step="any" placeholder="порция" style="max-width:120px">
-      <select class="inp" id="dishUnit" style="max-width:90px">
-        <option value="pcs">шт</option><option value="g">г</option><option value="ml">мл</option>
-      </select>
-      <input class="inp" id="dishKcal" type="number" min="0" placeholder="ккал за порцию">
+    <input class="inp" id="dishName" placeholder="название блюда (напр. Горячий бутерброд)" style="width:100%;margin-bottom:10px">
+
+    <div class="section-label" style="margin-top:0"><span class="sl-text">состав</span></div>
+    <div class="input-row">
+      <input class="inp" id="dishIngText" placeholder="хлеб 50г, майонез 15г, колбаса 40г" style="min-width:150px" onkeydown="if(event.key==='Enter')dishParseText()">
+      <button class="icon-btn" id="dishVoiceBtn" title="Надиктовать состав" onclick="dishVoice()">🎤</button>
+      <button class="btn small" onclick="dishParseText()">рассчитать</button>
     </div>
-    <div class="manual-grid">
-      <div><label>Белки г</label><input class="inp" id="dishProt" type="number" min="0"></div>
-      <div><label>Жиры г</label><input class="inp" id="dishFat" type="number" min="0"></div>
-      <div><label>Углев г</label><input class="inp" id="dishCarb" type="number" min="0"></div>
-      <div style="display:flex;align-items:flex-end"><button class="btn" onclick="saveDish()" style="width:100%">СОХРАНИТЬ</button></div>
-    </div>
-    <div class="section-label" style="margin-top:20px"><span class="sl-text">сохранённые блюда</span></div>
+    <div class="hint" style="margin-top:6px">Перечисли продукты и количество (вписав или надиктовав 🎤) — AI посчитает КБЖУ каждого и сложит. Потом поправь количество, если нужно.</div>
+
+    <div id="dishIngList" style="margin-top:10px"></div>
+    <div class="dish-total" id="dishTotal"></div>
+
+    <button class="btn" onclick="saveDish()" style="width:100%;margin-top:12px">СОХРАНИТЬ БЛЮДО</button>
+
+    <div class="section-label" style="margin-top:22px"><span class="sl-text">сохранённые блюда</span></div>
     <div id="dishManager"></div>
   </div>
 </div>
@@ -655,45 +659,121 @@ function addDish(id) {
 }
 
 let editingDishId = null;
+let dishIngredients = []; // состав текущего редактируемого блюда: [{name,amount,unit,kcal,prot,fat,carb,per1}]
+
 function openDishForm(id) {
   editingDishId = id || null;
   const d = id ? state.dishes.find(x => x.id === id) : null;
   document.getElementById('dishFormTitle').textContent = d ? '// РЕДАКТИРОВАНИЕ' : '// НОВОЕ БЛЮДО';
   document.getElementById('dishId').value = d ? d.id : '';
   document.getElementById('dishName').value = d ? d.name : '';
-  document.getElementById('dishAmount').value = d && d.amount ? d.amount : '';
-  document.getElementById('dishUnit').value = d ? (d.unit||'pcs') : 'pcs';
-  document.getElementById('dishKcal').value = d ? d.kcal : '';
-  document.getElementById('dishProt').value = d && d.prot ? d.prot : '';
-  document.getElementById('dishFat').value  = d && d.fat ? d.fat : '';
-  document.getElementById('dishCarb').value = d && d.carb ? d.carb : '';
+  document.getElementById('dishIngText').value = '';
+  let ings = (d && d.ingredients && d.ingredients.length) ? d.ingredients
+           : (d && d.kcal ? [{ name:d.name, amount:d.amount||1, unit:d.unit||'pcs', kcal:d.kcal, prot:d.prot||0, fat:d.fat||0, carb:d.carb||0 }] : []);
+  dishIngredients = ings.map(i => {
+    const amt = i.amount || 1;
+    return { name:i.name, amount:amt, unit:i.unit||'g', kcal:i.kcal||0, prot:i.prot||0, fat:i.fat||0, carb:i.carb||0,
+             per1:{ kcal:(i.kcal||0)/amt, prot:(i.prot||0)/amt, fat:(i.fat||0)/amt, carb:(i.carb||0)/amt } };
+  });
+  renderDishIng();
   renderDishManager();
   document.getElementById('dishOverlay').classList.add('show');
 }
 
-function closeDishForm() { document.getElementById('dishOverlay').classList.remove('show'); editingDishId = null; }
+function closeDishForm() { document.getElementById('dishOverlay').classList.remove('show'); editingDishId = null; dishIngredients = []; }
 
 function clearDishForm() {
   editingDishId = null;
+  dishIngredients = [];
   document.getElementById('dishFormTitle').textContent = '// НОВОЕ БЛЮДО';
-  ['dishId','dishName','dishAmount','dishKcal','dishProt','dishFat','dishCarb'].forEach(i=>document.getElementById(i).value='');
-  document.getElementById('dishUnit').value = 'pcs';
+  ['dishId','dishName','dishIngText'].forEach(i=>document.getElementById(i).value='');
+  renderDishIng();
+}
+
+function computeDishTotal() {
+  const t = dishIngredients.reduce((a,i)=>({ kcal:a.kcal+(i.kcal||0), prot:a.prot+(i.prot||0), fat:a.fat+(i.fat||0), carb:a.carb+(i.carb||0) }), {kcal:0,prot:0,fat:0,carb:0});
+  return { kcal:Math.round(t.kcal), prot:round1(t.prot), fat:round1(t.fat), carb:round1(t.carb) };
+}
+
+function renderDishTotal() {
+  const t = computeDishTotal();
+  document.getElementById('dishTotal').innerHTML = dishIngredients.length
+    ? `Итого за блюдо: <b>${t.kcal}</b> ккал · Б ${t.prot} · Ж ${t.fat} · У ${t.carb}` : '';
+}
+
+function renderDishIng() {
+  const el = document.getElementById('dishIngList');
+  if (!el) return;
+  if (!dishIngredients.length) { el.innerHTML = '<div class="empty" style="margin-top:0">&gt; состав пуст — впишите продукты и нажмите «рассчитать» или 🎤</div>'; renderDishTotal(); return; }
+  el.innerHTML = dishIngredients.map((it,i) => `
+    <div class="review-item">
+      <div class="review-item-top">
+        <input class="inp review-name" value="${escAttr(it.name)}" oninput="dishIngSet(${i},'name',this.value)">
+        <span class="review-kcal" id="dk-${i}">${it.kcal}</span>
+        <button class="review-del" title="убрать" onclick="dishIngRemove(${i})">✕</button>
+      </div>
+      <div class="review-controls">
+        <input class="inp review-amt" type="number" min="0" step="any" value="${it.amount}" oninput="dishIngSet(${i},'amount',this.value)">
+        <select class="inp review-unit" onchange="dishIngSet(${i},'unit',this.value)">
+          ${['g','ml','pcs'].map(u=>`<option value="${u}" ${u===it.unit?'selected':''}>${UNIT_LABEL[u]}</option>`).join('')}
+        </select>
+        <span class="review-macros" id="dm-${i}">Б ${it.prot} · Ж ${it.fat} · У ${it.carb}</span>
+      </div>
+    </div>`).join('');
+  renderDishTotal();
+}
+
+function dishIngSet(i, field, val) {
+  const it = dishIngredients[i];
+  if (!it) return;
+  if (field === 'name') { it.name = val; return; }
+  if (field === 'unit') { it.unit = val; return; }
+  if (field === 'amount') {
+    const a = parseFloat(val) || 0;
+    it.amount = a;
+    it.kcal = Math.round(it.per1.kcal*a);
+    it.prot = round1(it.per1.prot*a);
+    it.fat  = round1(it.per1.fat*a);
+    it.carb = round1(it.per1.carb*a);
+    const dk = document.getElementById('dk-'+i); if (dk) dk.textContent = it.kcal;
+    const dm = document.getElementById('dm-'+i); if (dm) dm.textContent = `Б ${it.prot} · Ж ${it.fat} · У ${it.carb}`;
+    renderDishTotal();
+  }
+}
+
+function dishIngRemove(i) { dishIngredients.splice(i,1); renderDishIng(); }
+
+function addDishIngredients(items) {
+  items.forEach(it => dishIngredients.push(it));
+  renderDishIng();
+  toast(`Добавлено в состав: ${items.length}`);
+}
+
+function dishParseText() {
+  const t = document.getElementById('dishIngText').value.trim();
+  if (!t) { toast('Впишите состав или надиктуйте 🎤'); return; }
+  document.getElementById('dishIngText').value = '';
+  toast('Считаю КБЖУ состава…');
+  recognizeFood([{ text: `Это состав одного блюда — список ингредиентов с количествами: "${t}". ` + FOOD_LIST_JSON_SPEC }], addDishIngredients);
+}
+
+function dishVoice() {
+  listenVoice('dishVoiceBtn', async (text) => {
+    toast('Состав: «' + text + '» — считаю…');
+    await recognizeFood([{ text: `Это состав одного блюда — список ингредиентов с количествами: "${text}". ` + FOOD_LIST_JSON_SPEC }], addDishIngredients);
+  });
 }
 
 function saveDish() {
   const name = document.getElementById('dishName').value.trim();
-  const kcal = Math.round(parseFloat(document.getElementById('dishKcal').value) || 0);
   if (!name) { toast('ERROR: введите название блюда'); return; }
-  if (!kcal) { toast('ERROR: укажите калории за порцию'); return; }
+  if (!dishIngredients.length) { toast('ERROR: добавьте состав — впишите продукты и нажмите «рассчитать»'); return; }
+  const t = computeDishTotal();
   const dish = {
     id: editingDishId || ('d-'+Date.now()),
-    name,
-    amount: parseFloat(document.getElementById('dishAmount').value) || null,
-    unit: document.getElementById('dishUnit').value,
-    kcal,
-    prot: round1(parseFloat(document.getElementById('dishProt').value) || 0),
-    fat:  round1(parseFloat(document.getElementById('dishFat').value)  || 0),
-    carb: round1(parseFloat(document.getElementById('dishCarb').value) || 0)
+    name, amount:1, unit:'pcs',
+    kcal:t.kcal, prot:t.prot, fat:t.fat, carb:t.carb,
+    ingredients: dishIngredients.map(i => ({ name:i.name, amount:i.amount, unit:i.unit, kcal:i.kcal, prot:i.prot, fat:i.fat, carb:i.carb }))
   };
   const i = editingDishId ? state.dishes.findIndex(x => x.id === editingDishId) : -1;
   if (i >= 0) state.dishes[i] = dish; else state.dishes.push(dish);
@@ -701,7 +781,7 @@ function saveDish() {
   clearDishForm();
   renderDishes();
   renderDishManager();
-  toast('Блюдо сохранено');
+  toast(`Блюдо сохранено · ${t.kcal} ккал`);
 }
 
 function deleteDish(id) {
@@ -1006,11 +1086,11 @@ function normalizeItems(parsed) {
 }
 
 // Общий путь: вызвать Gemini, распарсить в позиции, открыть экран подтверждения
-async function recognizeFood(parts) {
+async function recognizeFood(parts, handler) {
   const result = await callGemini(parts);
   const items = normalizeItems(result);
   if (!items.length) { toast('Ничего не распозналось — попробуйте ещё раз или впишите вручную (+)'); return; }
-  openReview(items);
+  if (handler) handler(items); else openReview(items);
 }
 
 async function callGemini(parts) {
@@ -1080,21 +1160,21 @@ function fileToBase64(file) {
 }
 
 let voiceRecognition = null;
-function startVoice() {
-  // повторный тап по 🎤 = остановить и обработать
+// Общий голосовой ввод: тап — старт, повторный тап — стоп и обработка. onFinalText(text) — что делать с распознанной речью.
+function listenVoice(btnId, onFinalText) {
   if (voiceRecognition) { try { voiceRecognition.stop(); } catch(e){} return; }
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { toast('Голосовой ввод не поддерживается в этом браузере'); return; }
   if (!state.settings.geminiKey) { toast('Добавьте Gemini API ключ в разделе Цели для авто-КБЖУ'); return; }
-  const btn = document.getElementById('voiceBtn');
+  const btn = document.getElementById(btnId);
   const recognition = new SR();
   voiceRecognition = recognition;
   recognition.lang = 'ru-RU';
   recognition.interimResults = true;
-  recognition.continuous = true; // даём наговорить весь приём пищи с паузами
+  recognition.continuous = true; // даём наговорить с паузами
   let transcript = '';
-  btn.classList.add('listening');
-  toast('Слушаю… говорите, что съели, потом нажмите 🎤 ещё раз');
+  if (btn) btn.classList.add('listening');
+  toast('Слушаю… говорите, потом нажмите 🎤 ещё раз');
   recognition.onresult = (e) => {
     transcript = '';
     for (let i = 0; i < e.results.length; i++) {
@@ -1103,16 +1183,22 @@ function startVoice() {
   };
   recognition.onerror = (e) => { toast('Ошибка распознавания речи: ' + e.error); };
   recognition.onend = async () => {
-    btn.classList.remove('listening');
+    if (btn) btn.classList.remove('listening');
     voiceRecognition = null;
     const text = transcript.trim();
     if (!text) { toast('Не расслышал — попробуйте ещё раз'); return; }
+    await onFinalText(text);
+  };
+  recognition.start();
+}
+
+function startVoice() {
+  listenVoice('voiceBtn', async (text) => {
     toast('Распознал: «' + text + '» — анализирую…');
     await recognizeFood([
       { text: `Пользователь надиктовал обычной речью, что он съел: "${text}". ` + FOOD_LIST_JSON_SPEC }
     ]);
-  };
-  recognition.start();
+  });
 }
 
 // ───────────────────────── REVIEW / ПОДТВЕРЖДЕНИЕ РАСПОЗНАННОГО ─────────────────────────
