@@ -334,9 +334,9 @@
     <div class="section-label" style="margin-top:32px"><span class="sl-text">AI распознавание (Gemini)</span></div>
     <div class="goals-form">
       <div class="goal-field"><label>Gemini API ключ</label><input class="inp" id="geminiKey" type="password" placeholder="AIza..." style="width:100%"></div>
-      <div class="goal-field"><label>Модель Gemini</label><input class="inp" id="geminiModel" type="text" placeholder="gemini-2.0-flash" style="width:100%"></div>
+      <div class="goal-field"><label>Модель Gemini</label><input class="inp" id="geminiModel" type="text" placeholder="gemini-2.5-flash" style="width:100%"></div>
     </div>
-    <div class="hint">Ключ хранится только в localStorage этого браузера и используется для распознавания еды по фото/голосу. Если запросы не проходят из-за CORS — используется прокси corsproxy.io, как в PromptForge. Проверь актуальное имя модели в документации Google AI, если получишь ошибку 404.</div>
+    <div class="hint">Ключ хранится только в localStorage этого браузера и используется для распознавания еды по фото/голосу. Запрос идёт напрямую в Google; если браузер заблокирует его (CORS), автоматически повторяется через прокси corsproxy.io. Модель по умолчанию — <b>gemini-2.5-flash</b>. Если увидишь ошибку «HTTP 404 ... model not found» — впиши сюда другое имя модели (например <b>gemini-2.0-flash</b> или <b>gemini-flash-latest</b>) и сохрани.</div>
     <button class="btn outline small" onclick="saveGeminiSettings()" style="margin-top:10px">Сохранить ключ</button>
 
     <div class="section-label" style="margin-top:32px"><span class="sl-text">системные операции</span></div>
@@ -392,7 +392,7 @@ let state = {
   goals: { kcal:2000, weight:null, height:null, age:null, gender:'', activity:1.55 },
   products: {},  // normalizedName -> {name,unit,per1:{kcal,prot,fat,carb},usageCount,lastAmount,lastUsed}
   barcodeCache: {}, // code -> {name,unit,per1}
-  settings: { geminiKey:'', geminiModel:'gemini-2.0-flash' }
+  settings: { geminiKey:'', geminiModel:'gemini-2.5-flash' }
 };
 
 let currentMeal = autoMeal();
@@ -460,8 +460,9 @@ function ensureDefaults() {
   if (!state.weights) state.weights = [];
   if (!state.goals) state.goals = { kcal:2000, weight:null, height:null, age:null, gender:'', activity:1.55 };
   if (!state.barcodeCache) state.barcodeCache = {};
-  if (!state.settings) state.settings = { geminiKey:'', geminiModel:'gemini-2.0-flash' };
-  if (!state.settings.geminiModel) state.settings.geminiModel = 'gemini-2.0-flash';
+  if (!state.settings) state.settings = { geminiKey:'', geminiModel:'gemini-2.5-flash' };
+  if (!state.settings.geminiModel) state.settings.geminiModel = 'gemini-2.5-flash';
+  if (state.settings.geminiModel === 'gemini-2.0-flash') state.settings.geminiModel = 'gemini-2.5-flash'; // миграция устаревшего дефолта
   if (!state.products || !Object.keys(state.products).length) {
     state.products = {};
     SEED_PRODUCTS.forEach(p => { state.products[normKey(p.name)] = { ...p, usageCount:1, lastUsed:null }; });
@@ -839,18 +840,18 @@ async function lookupBarcode(code) {
 }
 
 // ───────────────────────── GEMINI: PHOTO + VOICE ─────────────────────────
-function geminiTargetUrl() {
-  const model = state.settings.geminiModel || 'gemini-2.0-flash';
-  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${state.settings.geminiKey}`;
-}
-
-function geminiProxiedUrl() {
-  return 'https://corsproxy.io/?url=' + encodeURIComponent(geminiTargetUrl());
+function geminiEndpoint() {
+  const model = state.settings.geminiModel || 'gemini-2.5-flash';
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(state.settings.geminiKey)}`;
 }
 
 function parseAIJson(text) {
-  const clean = (text||'').replace(/```json|```/g,'').trim();
-  try { return JSON.parse(clean); } catch(e) { return null; }
+  let clean = (text||'').replace(/```json|```/g,'').trim();
+  try { return JSON.parse(clean); } catch(e) {}
+  // запасной вариант: вытащить первый блок {...} или [...] из текста
+  const m = clean.match(/[\{\[][\s\S]*[\}\]]/);
+  if (m) { try { return JSON.parse(m[0]); } catch(e) {} }
+  return null;
 }
 
 const FOOD_LIST_JSON_SPEC = `Раздели описание на ОТДЕЛЬНЫЕ позиции — каждый продукт или блюдо отдельным элементом. Для каждой позиции оцени КБЖУ для ВСЕЙ названной порции целиком (НЕ на 100 г). Если количество указано в описании — используй именно его. Если количество НЕ названо — оцени типичную разумную порцию и поставь "assumed":true; если количество названо — "assumed":false. Ответь СТРОГО в формате JSON без markdown и без пояснений, ровно такой структуры: {"items":[{"name":"название по-русски","amount":число,"unit":"g или ml или pcs","kcal":число,"prot":число,"fat":число,"carb":число,"assumed":true или false}]}.`;
@@ -888,20 +889,40 @@ async function recognizeFood(parts) {
 
 async function callGemini(parts) {
   if (!state.settings.geminiKey) { toast('Сначала добавьте Gemini API ключ в разделе Цели'); return null; }
-  try {
-    const res = await fetch(geminiProxiedUrl(), {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ contents:[{ parts }] })
-    });
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const parsed = parseAIJson(text);
-    if (!parsed) toast('Не удалось разобрать ответ AI, проверьте ключ/модель');
-    return parsed;
-  } catch(e) {
-    toast('Ошибка Gemini API: ' + e.message);
+  const body = JSON.stringify({
+    contents: [{ parts }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.2 }
+  });
+  const direct = geminiEndpoint();
+  const proxied = 'https://corsproxy.io/?url=' + encodeURIComponent(direct);
+  let data = null, lastErr = '';
+  // 1) пробуем напрямую (Gemini поддерживает CORS из браузера), 2) если сеть/CORS — через прокси
+  for (const url of [direct, proxied]) {
+    try {
+      const res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body });
+      const raw = await res.text();
+      let json = null; try { json = JSON.parse(raw); } catch(e) {}
+      if (!res.ok) {
+        lastErr = `HTTP ${res.status}: ` + ((json && json.error && json.error.message) || raw.slice(0,160) || res.statusText);
+        if (res.status >= 400 && res.status < 500) break; // битый ключ/модель/квота — прокси не спасёт
+        continue;
+      }
+      data = json; break;
+    } catch(e) {
+      lastErr = e.message || 'сетевая ошибка'; continue; // вероятно CORS — пробуем прокси
+    }
+  }
+  if (!data) { toast('Gemini: ' + (lastErr || 'нет ответа')); return null; }
+  const cand = data.candidates && data.candidates[0];
+  const text = cand && cand.content && cand.content.parts && cand.content.parts[0] && cand.content.parts[0].text || '';
+  if (!text) {
+    const reason = (cand && cand.finishReason) || (data.promptFeedback && data.promptFeedback.blockReason);
+    toast('Gemini вернул пустой ответ' + (reason ? ' (' + reason + ')' : '') + ' — проверьте модель в Цели');
     return null;
   }
+  const parsed = parseAIJson(text);
+  if (!parsed) toast('AI ответил не-JSON: ' + text.slice(0,80));
+  return parsed;
 }
 
 function openPhotoCapture() {
@@ -1161,7 +1182,7 @@ function loadGoalsUI() {
   if (g.gender) document.getElementById('goalGender').value = g.gender;
   if (g.activity) document.getElementById('goalActivity').value = g.activity;
   document.getElementById('geminiKey').value = state.settings.geminiKey || '';
-  document.getElementById('geminiModel').value = state.settings.geminiModel || 'gemini-2.0-flash';
+  document.getElementById('geminiModel').value = state.settings.geminiModel || 'gemini-2.5-flash';
 }
 
 function saveGoals() {
@@ -1177,7 +1198,7 @@ function saveGoals() {
 
 function saveGeminiSettings() {
   state.settings.geminiKey = document.getElementById('geminiKey').value.trim();
-  state.settings.geminiModel = document.getElementById('geminiModel').value.trim() || 'gemini-2.0-flash';
+  state.settings.geminiModel = document.getElementById('geminiModel').value.trim() || 'gemini-2.5-flash';
   save();
   toast('Ключ Gemini сохранён локально');
 }
@@ -1215,7 +1236,7 @@ function renderProgress() {
 
 function resetAll() {
   if (!confirm('RESET ALL DATA? This cannot be undone.')) return;
-  state = { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, barcodeCache:{}, settings:{geminiKey:'',geminiModel:'gemini-2.0-flash'} };
+  state = { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, barcodeCache:{}, settings:{geminiKey:'',geminiModel:'gemini-2.5-flash'} };
   ensureDefaults(); save(); renderAll();
   toast('ALL_DATA_CLEARED');
 }
