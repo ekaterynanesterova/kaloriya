@@ -235,6 +235,12 @@
     <div class="meal-bar" id="mealBar"></div>
 
     <div class="section-label">
+      <span class="sl-text">мои блюда</span>
+      <button class="sl-action" onclick="openDishForm()">+ блюдо</button>
+    </div>
+    <div class="quick-foods" id="dishList"></div>
+
+    <div class="section-label">
       <span class="sl-text">быстрое добавление</span>
       <button class="sl-action" onclick="refreshQuickAdd()">↻ обновить</button>
     </div>
@@ -374,6 +380,30 @@
   </div>
 </div>
 
+<!-- МОИ БЛЮДА: создание / редактирование -->
+<div class="overlay" id="dishOverlay">
+  <div class="overlay-box" style="max-width:520px">
+    <div class="overlay-title"><span id="dishFormTitle">// НОВОЕ БЛЮДО</span><span class="overlay-close" onclick="closeDishForm()">✕ закрыть</span></div>
+    <input type="hidden" id="dishId">
+    <input class="inp" id="dishName" placeholder="название блюда (напр. Бутерброд с сыром)" style="width:100%;margin-bottom:8px">
+    <div class="input-row" style="margin-bottom:8px">
+      <input class="inp" id="dishAmount" type="number" min="0" step="any" placeholder="порция" style="max-width:120px">
+      <select class="inp" id="dishUnit" style="max-width:90px">
+        <option value="pcs">шт</option><option value="g">г</option><option value="ml">мл</option>
+      </select>
+      <input class="inp" id="dishKcal" type="number" min="0" placeholder="ккал за порцию">
+    </div>
+    <div class="manual-grid">
+      <div><label>Белки г</label><input class="inp" id="dishProt" type="number" min="0"></div>
+      <div><label>Жиры г</label><input class="inp" id="dishFat" type="number" min="0"></div>
+      <div><label>Углев г</label><input class="inp" id="dishCarb" type="number" min="0"></div>
+      <div style="display:flex;align-items:flex-end"><button class="btn" onclick="saveDish()" style="width:100%">СОХРАНИТЬ</button></div>
+    </div>
+    <div class="section-label" style="margin-top:20px"><span class="sl-text">сохранённые блюда</span></div>
+    <div id="dishManager"></div>
+  </div>
+</div>
+
 <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none">
 
 <script>
@@ -392,6 +422,7 @@ let state = {
   goals: { kcal:2000, weight:null, height:null, age:null, gender:'', activity:1.55 },
   products: {},  // normalizedName -> {name,unit,per1:{kcal,prot,fat,carb},usageCount,lastAmount,lastUsed}
   barcodeCache: {}, // code -> {name,unit,per1}
+  dishes: [],    // готовые блюда: [{id,name,amount,unit,kcal,prot,fat,carb}]
   settings: { geminiKey:'', geminiModel:'gemini-2.5-flash' }
 };
 
@@ -460,6 +491,7 @@ function ensureDefaults() {
   if (!state.weights) state.weights = [];
   if (!state.goals) state.goals = { kcal:2000, weight:null, height:null, age:null, gender:'', activity:1.55 };
   if (!state.barcodeCache) state.barcodeCache = {};
+  if (!state.dishes) state.dishes = [];
   if (!state.settings) state.settings = { geminiKey:'', geminiModel:'gemini-2.5-flash' };
   if (!state.settings.geminiModel) state.settings.geminiModel = 'gemini-2.5-flash';
   if (state.settings.geminiModel === 'gemini-2.0-flash') state.settings.geminiModel = 'gemini-2.5-flash'; // миграция устаревшего дефолта
@@ -531,6 +563,7 @@ function renderToday() {
   renderFoodList(items, key);
   renderMiniBars();
   renderProductNames();
+  renderDishes();
 }
 
 function renderFoodList(items, dateKey) {
@@ -598,6 +631,99 @@ function quickAdd(key) {
   });
   upsertProduct(p.name, p.unit, p.per1, p.lastAmount);
   toast(`${p.name} +${Math.round(p.per1.kcal*p.lastAmount)} ккал`);
+}
+
+// ───────────────────────── МОИ БЛЮДА (готовые порции) ─────────────────────────
+function renderDishes() {
+  const el = document.getElementById('dishList');
+  if (!el) return;
+  if (!state.dishes.length) {
+    el.innerHTML = '<div class="empty" style="margin-top:0;width:100%">&gt; пусто — нажмите «+ блюдо», чтобы сохранить готовое блюдо</div>';
+    return;
+  }
+  el.innerHTML = state.dishes.map(d =>
+    `<button class="quick-chip" onclick="addDish('${d.id}')">🍽 ${escAttr(d.name)} · <b>${d.kcal}</b></button>`
+  ).join('');
+}
+
+function addDish(id) {
+  const d = state.dishes.find(x => x.id === id);
+  if (!d) return;
+  pushEntry({ name:d.name, meal:currentMeal, amount:d.amount||null, unit:d.unit||'pcs',
+    kcal:d.kcal||0, prot:d.prot||0, fat:d.fat||0, carb:d.carb||0, source:'dish' });
+  toast(`${d.name} +${d.kcal} ккал · ${MEALS.find(m=>m.key===currentMeal).label}`);
+}
+
+let editingDishId = null;
+function openDishForm(id) {
+  editingDishId = id || null;
+  const d = id ? state.dishes.find(x => x.id === id) : null;
+  document.getElementById('dishFormTitle').textContent = d ? '// РЕДАКТИРОВАНИЕ' : '// НОВОЕ БЛЮДО';
+  document.getElementById('dishId').value = d ? d.id : '';
+  document.getElementById('dishName').value = d ? d.name : '';
+  document.getElementById('dishAmount').value = d && d.amount ? d.amount : '';
+  document.getElementById('dishUnit').value = d ? (d.unit||'pcs') : 'pcs';
+  document.getElementById('dishKcal').value = d ? d.kcal : '';
+  document.getElementById('dishProt').value = d && d.prot ? d.prot : '';
+  document.getElementById('dishFat').value  = d && d.fat ? d.fat : '';
+  document.getElementById('dishCarb').value = d && d.carb ? d.carb : '';
+  renderDishManager();
+  document.getElementById('dishOverlay').classList.add('show');
+}
+
+function closeDishForm() { document.getElementById('dishOverlay').classList.remove('show'); editingDishId = null; }
+
+function clearDishForm() {
+  editingDishId = null;
+  document.getElementById('dishFormTitle').textContent = '// НОВОЕ БЛЮДО';
+  ['dishId','dishName','dishAmount','dishKcal','dishProt','dishFat','dishCarb'].forEach(i=>document.getElementById(i).value='');
+  document.getElementById('dishUnit').value = 'pcs';
+}
+
+function saveDish() {
+  const name = document.getElementById('dishName').value.trim();
+  const kcal = Math.round(parseFloat(document.getElementById('dishKcal').value) || 0);
+  if (!name) { toast('ERROR: введите название блюда'); return; }
+  if (!kcal) { toast('ERROR: укажите калории за порцию'); return; }
+  const dish = {
+    id: editingDishId || ('d-'+Date.now()),
+    name,
+    amount: parseFloat(document.getElementById('dishAmount').value) || null,
+    unit: document.getElementById('dishUnit').value,
+    kcal,
+    prot: round1(parseFloat(document.getElementById('dishProt').value) || 0),
+    fat:  round1(parseFloat(document.getElementById('dishFat').value)  || 0),
+    carb: round1(parseFloat(document.getElementById('dishCarb').value) || 0)
+  };
+  const i = editingDishId ? state.dishes.findIndex(x => x.id === editingDishId) : -1;
+  if (i >= 0) state.dishes[i] = dish; else state.dishes.push(dish);
+  save();
+  clearDishForm();
+  renderDishes();
+  renderDishManager();
+  toast('Блюдо сохранено');
+}
+
+function deleteDish(id) {
+  state.dishes = state.dishes.filter(x => x.id !== id);
+  if (editingDishId === id) clearDishForm();
+  save();
+  renderDishes();
+  renderDishManager();
+}
+
+function renderDishManager() {
+  const el = document.getElementById('dishManager');
+  if (!el) return;
+  if (!state.dishes.length) { el.innerHTML = '<div class="empty" style="margin-top:0">&gt; ещё нет сохранённых блюд</div>'; return; }
+  el.innerHTML = state.dishes.map(d => `
+    <div class="food-item">
+      <div class="food-name">${escAttr(d.name)}</div>
+      ${d.amount ? `<div class="food-amount">${d.amount} ${UNIT_LABEL[d.unit]||''}</div>` : ''}
+      <div class="food-kcal">${d.kcal}</div>
+      <button class="food-del" title="изменить" onclick="openDishForm('${d.id}')" style="color:var(--cyan)">✎</button>
+      <button class="food-del" title="удалить" onclick="deleteDish('${d.id}')">✕</button>
+    </div>`).join('');
 }
 
 function round1(n) { return Math.round(n*10)/10; }
@@ -1236,7 +1362,7 @@ function renderProgress() {
 
 function resetAll() {
   if (!confirm('RESET ALL DATA? This cannot be undone.')) return;
-  state = { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, barcodeCache:{}, settings:{geminiKey:'',geminiModel:'gemini-2.5-flash'} };
+  state = { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, barcodeCache:{}, dishes:[], settings:{geminiKey:'',geminiModel:'gemini-2.5-flash'} };
   ensureDefaults(); save(); renderAll();
   toast('ALL_DATA_CLEARED');
 }
@@ -1252,7 +1378,7 @@ function switchTab(name, btn) {
   if (name==='goals') { loadGoalsUI(); renderProgress(); }
 }
 
-function renderAll() { renderToday(); renderQuickFoods(); }
+function renderAll() { renderToday(); renderQuickFoods(); renderDishes(); }
 
 // ───────────────────────── INIT ─────────────────────────
 load();
