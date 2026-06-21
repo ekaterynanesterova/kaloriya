@@ -169,6 +169,23 @@
   .scan-status { font-size:.68rem; color:var(--text-dim); margin-top:10px; text-align:center; }
   .manual-barcode-row { display:none; gap:8px; margin-top:12px; }
 
+  /* REVIEW SHEET */
+  .review-meal-row { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+  .review-meal-label { font-size:.6rem; letter-spacing:.14em; text-transform:uppercase; color:var(--text-dim); white-space:nowrap; }
+  #reviewList { max-height:48vh; overflow-y:auto; }
+  .review-item { border:1px solid var(--border); background:var(--bg2); padding:10px 12px; margin-bottom:6px; animation:slideIn .2s ease both; }
+  .review-item-top { display:flex; align-items:center; gap:8px; }
+  .review-name { flex:1; min-width:0; font-size:.82rem; }
+  .review-kcal { font-family:'Orbitron',monospace; font-size:.95rem; font-weight:700; color:var(--cyan); text-shadow:0 0 8px rgba(0,255,224,.3); min-width:46px; text-align:right; }
+  .review-del { background:none; border:none; cursor:pointer; color:var(--text-dim); font-size:.95rem; padding:0 2px; transition:color .15s; }
+  .review-del:hover { color:var(--magenta); text-shadow:0 0 6px var(--magenta); }
+  .review-controls { display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
+  .review-controls .inp { padding:6px 8px; font-size:.74rem; flex:0; }
+  .review-amt { width:84px; }
+  .review-unit { width:64px; }
+  .assumed-badge { font-size:.55rem; letter-spacing:.06em; padding:2px 6px; border:1px solid rgba(255,210,74,.35); background:var(--yellow-dim); color:var(--yellow); text-transform:uppercase; white-space:nowrap; }
+  .review-macros { font-size:.64rem; color:var(--text-dim); margin-left:auto; }
+
   @keyframes fadeDown { from{opacity:0;transform:translateY(-12px)} to{opacity:1;transform:translateY(0)} }
   @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
   @keyframes slideIn { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
@@ -340,6 +357,20 @@
       <input class="inp" id="manualBarcodeInput" placeholder="введите номер штрихкода">
       <button class="btn small" onclick="lookupBarcode(document.getElementById('manualBarcodeInput').value)">найти</button>
     </div>
+  </div>
+</div>
+
+<!-- REVIEW / ПОДТВЕРЖДЕНИЕ РАСПОЗНАННОГО -->
+<div class="overlay" id="reviewOverlay">
+  <div class="overlay-box" style="max-width:560px">
+    <div class="overlay-title"><span>// ПРОВЕРЬТЕ И ДОБАВЬТЕ</span><span class="overlay-close" onclick="closeReview()">✕ отмена</span></div>
+    <div class="review-meal-row">
+      <span class="review-meal-label">Приём пищи</span>
+      <select class="inp" id="reviewMeal" style="flex:1"></select>
+    </div>
+    <div id="reviewList"></div>
+    <button class="btn" onclick="confirmReview()" style="width:100%;margin-top:14px">+ ДОБАВИТЬ ВСЁ (<span id="reviewCount">0</span>)</button>
+    <div class="hint" style="margin-top:8px">≈ оценка — порцию прикинул AI, проверьте количество. Меняешь количество — КБЖУ пересчитывается автоматически. Лишнее убери крестиком.</div>
   </div>
 </div>
 
@@ -822,7 +853,38 @@ function parseAIJson(text) {
   try { return JSON.parse(clean); } catch(e) { return null; }
 }
 
-const FOOD_JSON_SPEC = `Ответь СТРОГО в формате JSON без markdown и без пояснений, ровно такой структуры: {"name":"название блюда по-русски","amount":число,"unit":"g или ml или pcs","kcal":число,"prot":число,"fat":число,"carb":число}. Это калории/Б/Ж/У для ВСЕЙ порции целиком, не на 100г.`;
+const FOOD_LIST_JSON_SPEC = `Раздели описание на ОТДЕЛЬНЫЕ позиции — каждый продукт или блюдо отдельным элементом. Для каждой позиции оцени КБЖУ для ВСЕЙ названной порции целиком (НЕ на 100 г). Если количество указано в описании — используй именно его. Если количество НЕ названо — оцени типичную разумную порцию и поставь "assumed":true; если количество названо — "assumed":false. Ответь СТРОГО в формате JSON без markdown и без пояснений, ровно такой структуры: {"items":[{"name":"название по-русски","amount":число,"unit":"g или ml или pcs","kcal":число,"prot":число,"fat":число,"carb":число,"assumed":true или false}]}.`;
+
+function escAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// Привести любой ответ AI к массиву позиций с посчитанным per1
+function normalizeItems(parsed) {
+  if (!parsed) return [];
+  let arr = Array.isArray(parsed) ? parsed
+          : Array.isArray(parsed.items) ? parsed.items
+          : (parsed.name ? [parsed] : []);
+  return arr.filter(x => x && x.name).map(x => {
+    const amount = parseFloat(x.amount) || 1;
+    const kcal = Math.round(parseFloat(x.kcal) || 0);
+    const prot = round1(parseFloat(x.prot) || 0);
+    const fat  = round1(parseFloat(x.fat)  || 0);
+    const carb = round1(parseFloat(x.carb) || 0);
+    const unit = ['g','ml','pcs'].includes(x.unit) ? x.unit : 'g';
+    return {
+      name: String(x.name).trim(), amount, unit, kcal, prot, fat, carb,
+      assumed: !!x.assumed,
+      per1: { kcal:kcal/amount, prot:prot/amount, fat:fat/amount, carb:carb/amount }
+    };
+  });
+}
+
+// Общий путь: вызвать Gemini, распарсить в позиции, открыть экран подтверждения
+async function recognizeFood(parts) {
+  const result = await callGemini(parts);
+  const items = normalizeItems(result);
+  if (!items.length) { toast('Ничего не распозналось — попробуйте ещё раз или впишите вручную (+)'); return; }
+  openReview(items);
+}
 
 async function callGemini(parts) {
   if (!state.settings.geminiKey) { toast('Сначала добавьте Gemini API ключ в разделе Цели'); return null; }
@@ -853,11 +915,10 @@ document.getElementById('photoInput').addEventListener('change', async (e) => {
   toast('Анализирую фото...');
   try {
     const base64 = await fileToBase64(file);
-    const result = await callGemini([
-      { text: 'Ты нутрициолог-эксперт. На фото — еда. Определи что это и оцени порцию. ' + FOOD_JSON_SPEC },
+    await recognizeFood([
+      { text: 'Ты нутрициолог-эксперт. На фото — еда, возможно несколько блюд/продуктов сразу. Определи ВСЁ, что видно, и оцени порцию каждого. ' + FOOD_LIST_JSON_SPEC },
       { inline_data: { mime_type: file.type, data: base64 } }
     ]);
-    if (result) { fillFormFromAuto(result, 'ai'); toast('Распознано: ' + result.name); }
   } catch(err) { toast('Ошибка: ' + err.message); }
   e.target.value = '';
 });
@@ -871,28 +932,116 @@ function fileToBase64(file) {
   });
 }
 
+let voiceRecognition = null;
 function startVoice() {
+  // повторный тап по 🎤 = остановить и обработать
+  if (voiceRecognition) { try { voiceRecognition.stop(); } catch(e){} return; }
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { toast('Голосовой ввод не поддерживается в этом браузере'); return; }
   if (!state.settings.geminiKey) { toast('Добавьте Gemini API ключ в разделе Цели для авто-КБЖУ'); return; }
   const btn = document.getElementById('voiceBtn');
   const recognition = new SR();
+  voiceRecognition = recognition;
   recognition.lang = 'ru-RU';
-  recognition.interimResults = false;
+  recognition.interimResults = true;
+  recognition.continuous = true; // даём наговорить весь приём пищи с паузами
+  let transcript = '';
   btn.classList.add('listening');
-  toast('Слушаю...');
-  recognition.onresult = async (e) => {
-    const text = e.results[0][0].transcript;
-    document.getElementById('foodName').value = text;
-    toast('Распознано: ' + text + ' — анализирую...');
-    const result = await callGemini([
-      { text: `Пользователь сказал, что съел: "${text}". Определи блюдо и оцени порцию. ` + FOOD_JSON_SPEC }
-    ]);
-    if (result) { fillFormFromAuto(result, 'ai'); toast('Готово: ' + result.name); }
+  toast('Слушаю… говорите, что съели, потом нажмите 🎤 ещё раз');
+  recognition.onresult = (e) => {
+    transcript = '';
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) transcript += e.results[i][0].transcript + ' ';
+    }
   };
   recognition.onerror = (e) => { toast('Ошибка распознавания речи: ' + e.error); };
-  recognition.onend = () => { btn.classList.remove('listening'); };
+  recognition.onend = async () => {
+    btn.classList.remove('listening');
+    voiceRecognition = null;
+    const text = transcript.trim();
+    if (!text) { toast('Не расслышал — попробуйте ещё раз'); return; }
+    toast('Распознал: «' + text + '» — анализирую…');
+    await recognizeFood([
+      { text: `Пользователь надиктовал обычной речью, что он съел: "${text}". ` + FOOD_LIST_JSON_SPEC }
+    ]);
+  };
   recognition.start();
+}
+
+// ───────────────────────── REVIEW / ПОДТВЕРЖДЕНИЕ РАСПОЗНАННОГО ─────────────────────────
+let reviewItems = [];
+function openReview(items) {
+  reviewItems = items.slice();
+  const sel = document.getElementById('reviewMeal');
+  sel.innerHTML = MEALS.map(m => `<option value="${m.key}" ${m.key===currentMeal?'selected':''}>${m.icon} ${m.label}</option>`).join('');
+  renderReview();
+  document.getElementById('reviewOverlay').classList.add('show');
+}
+
+function renderReview() {
+  document.getElementById('reviewCount').textContent = reviewItems.length;
+  const list = document.getElementById('reviewList');
+  if (!reviewItems.length) { list.innerHTML = '<div class="empty">&gt; список пуст</div>'; return; }
+  list.innerHTML = reviewItems.map((it,i) => `
+    <div class="review-item">
+      <div class="review-item-top">
+        <input class="inp review-name" value="${escAttr(it.name)}" oninput="reviewSet(${i},'name',this.value)">
+        <span class="review-kcal" id="rk-${i}">${it.kcal}</span>
+        <button class="review-del" title="убрать" onclick="reviewRemove(${i})">✕</button>
+      </div>
+      <div class="review-controls">
+        <input class="inp review-amt" type="number" min="0" step="any" value="${it.amount}" oninput="reviewSet(${i},'amount',this.value)">
+        <select class="inp review-unit" onchange="reviewSet(${i},'unit',this.value)">
+          ${['g','ml','pcs'].map(u=>`<option value="${u}" ${u===it.unit?'selected':''}>${UNIT_LABEL[u]}</option>`).join('')}
+        </select>
+        ${it.assumed ? '<span class="assumed-badge" title="порцию оценил AI — проверьте">≈ оценка</span>' : ''}
+        <span class="review-macros" id="rm-${i}">Б ${it.prot} · Ж ${it.fat} · У ${it.carb}</span>
+      </div>
+    </div>`).join('');
+}
+
+function reviewSet(i, field, val) {
+  const it = reviewItems[i];
+  if (!it) return;
+  if (field === 'name') { it.name = val; return; }
+  if (field === 'unit') { it.unit = val; return; }
+  if (field === 'amount') {
+    const amt = parseFloat(val) || 0;
+    it.amount = amt;
+    it.kcal = Math.round(it.per1.kcal*amt);
+    it.prot = round1(it.per1.prot*amt);
+    it.fat  = round1(it.per1.fat*amt);
+    it.carb = round1(it.per1.carb*amt);
+    it.assumed = false; // пользователь подтвердил количество вручную
+    const rk = document.getElementById('rk-'+i); if (rk) rk.textContent = it.kcal;
+    const rm = document.getElementById('rm-'+i); if (rm) rm.textContent = `Б ${it.prot} · Ж ${it.fat} · У ${it.carb}`;
+  }
+}
+
+function reviewRemove(i) { reviewItems.splice(i,1); renderReview(); }
+function closeReview() { document.getElementById('reviewOverlay').classList.remove('show'); reviewItems = []; }
+
+function addEntryNoRender(entry) {
+  const key = todayKey();
+  if (!state.entries[key]) state.entries[key] = [];
+  entry.id = key+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+  state.entries[key].push(entry);
+}
+
+function confirmReview() {
+  if (!reviewItems.length) { closeReview(); return; }
+  const meal = document.getElementById('reviewMeal').value || currentMeal;
+  let added = 0, totalKcal = 0;
+  reviewItems.forEach(it => {
+    if (!it.name || !it.amount) return;
+    addEntryNoRender({ name:it.name, meal, amount:it.amount, unit:it.unit, kcal:it.kcal, prot:it.prot, fat:it.fat, carb:it.carb, source:'ai' });
+    upsertProduct(it.name, it.unit, it.per1, it.amount);
+    added++; totalKcal += it.kcal;
+  });
+  save();
+  closeReview();
+  renderToday();
+  toast(`Добавлено: ${added} поз. · ${totalKcal} ккал`);
 }
 
 // ───────────────────────── WEIGHT ─────────────────────────
