@@ -27,7 +27,13 @@
   .logo { font-family:'Orbitron',monospace; font-size:1.9rem; font-weight:900; letter-spacing:.08em; color:var(--text-bright); line-height:1; text-shadow:0 0 20px rgba(0,255,224,.35); }
   .logo-accent { color:var(--cyan); text-shadow:0 0 16px var(--cyan); }
   .boot-line { font-size:.58rem; color:var(--text-dim); letter-spacing:.08em; margin-top:5px; }
-  .date-display { font-size:.68rem; color:var(--cyan); letter-spacing:.1em; padding:4px 12px; border:1px solid rgba(0,255,224,.25); background:var(--cyan-dim); margin-left:auto; text-shadow:0 0 8px rgba(0,255,224,.5); }
+  .header-right { margin-left:auto; display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
+  .date-display { font-size:.68rem; color:var(--cyan); letter-spacing:.1em; padding:4px 12px; border:1px solid rgba(0,255,224,.25); background:var(--cyan-dim); text-shadow:0 0 8px rgba(0,255,224,.5); }
+  .header-account { font-size:.6rem; letter-spacing:.06em; color:var(--text-dim); display:flex; align-items:center; gap:8px; }
+  .header-account .ha-email { color:var(--green); text-shadow:0 0 6px rgba(0,255,136,.4); }
+  .header-account .ha-email::before { content:'◢ '; color:var(--green); }
+  .header-account .ha-logout { cursor:pointer; color:var(--text-dim); border:1px solid var(--border); padding:1px 7px; text-transform:uppercase; letter-spacing:.1em; transition:all .15s; }
+  .header-account .ha-logout:hover { color:var(--magenta); border-color:var(--magenta); }
   .blink { animation: blink 1.2s step-end infinite; }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
 
@@ -203,7 +209,13 @@
       <div class="logo">KAL<span class="logo-accent">◈</span>RIYA<span style="font-size:.65rem;opacity:.4;letter-spacing:.05em">.SYS</span></div>
       <div class="boot-line">&gt; NUTRITION_TRACKING_MODULE v3.0 — ONLINE<span class="blink">_</span></div>
     </div>
-    <div class="date-display" id="dateDisplay"></div>
+    <div class="header-right">
+      <div class="date-display" id="dateDisplay"></div>
+      <div class="header-account" id="headerAccount" style="display:none">
+        <span class="ha-email" id="headerEmail"></span>
+        <span class="ha-logout" onclick="authSignOut()">выйти</span>
+      </div>
+    </div>
   </header>
 
   <nav class="tabs">
@@ -1573,18 +1585,25 @@ document.getElementById('dateDisplay').textContent = now.toLocaleDateString('ru-
 document.getElementById('weightDate').value = todayKey();
 renderAll();
 
+function updateAccountUI(email) {
+  document.getElementById('accountEmail').textContent = email || '—';
+  const ha = document.getElementById('headerAccount');
+  document.getElementById('headerEmail').textContent = email || '';
+  ha.style.display = email ? 'flex' : 'none';
+}
+
 if (sb) {
   sb.auth.onAuthStateChange((event, session) => {
     if (session && session.user) {
       const changed = !currentUser || currentUser.id !== session.user.id;
       currentUser = session.user;
-      document.getElementById('accountEmail').textContent = session.user.email || '—';
+      updateAccountUI(session.user.email);
       showAuth(false);
-      if (event === 'SIGNED_IN') toast('Вы вошли: ' + (session.user.email || ''));
+      if (event === 'SIGNED_IN') toast('✓ Вы вошли: ' + (session.user.email || ''));
       if (changed) loadCloud();
     } else {
       currentUser = null;
-      document.getElementById('accountEmail').textContent = '—';
+      updateAccountUI(null);
       showAuth(true);
     }
   });
