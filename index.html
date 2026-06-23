@@ -37,7 +37,8 @@
   .blink { animation: blink 1.2s step-end infinite; }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
 
-  .tabs { display:flex; border-bottom:1px solid var(--border); margin-top:24px; animation: fadeDown .5s .1s ease both; overflow-x:auto; }
+  .tabs { display:flex; border-bottom:1px solid var(--border); margin-top:24px; animation: fadeDown .5s .1s ease both; overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none; }
+  .tabs::-webkit-scrollbar { display:none; height:0; }
   .tab-btn { font-family:'Share Tech Mono',monospace; font-size:.66rem; letter-spacing:.16em; text-transform:uppercase; padding:10px 16px; border:none; background:transparent; cursor:pointer; color:var(--text-dim); border-bottom:2px solid transparent; margin-bottom:-1px; transition:all .2s; white-space:nowrap; }
   .tab-btn.active { color:var(--cyan); border-bottom-color:var(--cyan); text-shadow:0 0 10px rgba(0,255,224,.6); background:var(--cyan-dim); }
   .tab-btn:hover:not(.active) { color:var(--text); background:var(--bg3); }
@@ -221,7 +222,7 @@
     <button class="tab-btn active" onclick="switchTab('today',this)">&gt; СЕГОДНЯ</button>
     <button class="tab-btn" onclick="switchTab('weight',this)">&gt; ВЕС</button>
     <button class="tab-btn" onclick="switchTab('history',this)">&gt; ИСТОРИЯ</button>
-    <button class="tab-btn" onclick="switchTab('goals',this)">&gt; ЦЕЛИ</button>
+    <button class="tab-btn" onclick="switchTab('goals',this)">&gt; НАСТРОЙКИ</button>
   </nav>
 
   <!-- TODAY -->
