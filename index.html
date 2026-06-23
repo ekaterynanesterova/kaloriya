@@ -1580,6 +1580,7 @@ if (sb) {
       currentUser = session.user;
       document.getElementById('accountEmail').textContent = session.user.email || '—';
       showAuth(false);
+      if (event === 'SIGNED_IN') toast('Вы вошли: ' + (session.user.email || ''));
       if (changed) loadCloud();
     } else {
       currentUser = null;
