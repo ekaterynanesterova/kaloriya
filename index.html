@@ -193,6 +193,7 @@
   @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
   @keyframes slideIn { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div class="container">
@@ -348,6 +349,13 @@
     <div class="hint">Ключ хранится только в localStorage этого браузера и используется для распознавания еды по фото/голосу. Запрос идёт напрямую в Google; если браузер заблокирует его (CORS), автоматически повторяется через прокси corsproxy.io. Модель по умолчанию — <b>gemini-2.5-flash</b>. Если увидишь ошибку «HTTP 404 ... model not found» — впиши сюда другое имя модели (например <b>gemini-2.0-flash</b> или <b>gemini-flash-latest</b>) и сохрани.</div>
     <button class="btn outline small" onclick="saveGeminiSettings()" style="margin-top:10px">Сохранить ключ</button>
 
+    <div class="section-label" style="margin-top:32px"><span class="sl-text">аккаунт</span></div>
+    <div id="accountBox" style="font-size:.74rem;color:var(--text-dim);line-height:1.8">
+      <div>Вы вошли как: <span id="accountEmail" style="color:var(--cyan)">—</span></div>
+      <div id="syncStatus" style="font-size:.64rem"></div>
+    </div>
+    <button class="btn outline small" onclick="authSignOut()" style="margin-top:10px">ВЫЙТИ ИЗ АККАУНТА</button>
+
     <div class="section-label" style="margin-top:32px"><span class="sl-text">системные операции</span></div>
     <button class="btn danger small" onclick="resetAll()" style="margin-top:8px">RESET ALL DATA</button>
   </div>
@@ -408,6 +416,21 @@
   </div>
 </div>
 
+<!-- ВХОД / РЕГИСТРАЦИЯ -->
+<div class="overlay" id="authOverlay" style="background:rgba(4,6,8,.98)">
+  <div class="overlay-box" style="max-width:380px">
+    <div class="overlay-title"><span>// ДОСТУП К KALORIYA</span></div>
+    <input class="inp" id="authEmail" type="email" autocomplete="email" placeholder="почта" style="width:100%;margin-bottom:8px">
+    <input class="inp" id="authPass" type="password" autocomplete="current-password" placeholder="пароль (мин. 6 символов)" style="width:100%;margin-bottom:12px" onkeydown="if(event.key==='Enter')authSignIn()">
+    <div style="display:flex;gap:8px">
+      <button class="btn" id="authSignInBtn" onclick="authSignIn()" style="flex:1">ВОЙТИ</button>
+      <button class="btn outline" id="authSignUpBtn" onclick="authSignUp()" style="flex:1">РЕГИСТРАЦИЯ</button>
+    </div>
+    <div class="scan-status" id="authStatus" style="margin-top:10px"></div>
+    <div class="hint" style="margin-top:8px">Данные синхронизируются между всеми твоими устройствами и видны только тебе.</div>
+  </div>
+</div>
+
 <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none">
 
 <script>
@@ -462,7 +485,10 @@ const SEED_PRODUCTS = [
 ];
 
 // ───────────────────────── PERSISTENCE ─────────────────────────
-function save() { try { localStorage.setItem('kaloriya_v3', JSON.stringify(state)); } catch(e){} }
+function save() {
+  try { localStorage.setItem('kaloriya_v3', JSON.stringify(state)); } catch(e){}
+  if (currentUser) syncCloud();
+}
 
 function load() {
   try {
@@ -1466,12 +1492,105 @@ function switchTab(name, btn) {
 
 function renderAll() { renderToday(); renderQuickFoods(); renderDishes(); }
 
+// ───────────────────────── SUPABASE: АККАУНТЫ + СИНХРОНИЗАЦИЯ ─────────────────────────
+const SUPABASE_URL = 'https://rezyccwdgnvaolxxrtut.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlenljY3dkZ252YW9seHhydHV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyMTIzMjQsImV4cCI6MjA5Nzc4ODMyNH0.LcCSZHOuGq6bvEqGret-2CAtak1DAGJhEAx1RwLLyzU';
+const sb = (window.supabase && window.supabase.createClient) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+let currentUser = null;
+let syncTimer = null;
+
+function showAuth(show) {
+  document.getElementById('authOverlay').classList.toggle('show', show);
+}
+function setSyncStatus(msg) { const el = document.getElementById('syncStatus'); if (el) el.textContent = msg; }
+
+async function authSignIn() {
+  if (!sb) { toast('Supabase не загрузился — проверьте интернет'); return; }
+  const email = document.getElementById('authEmail').value.trim();
+  const pass = document.getElementById('authPass').value;
+  if (!email || !pass) { document.getElementById('authStatus').textContent = 'Введите почту и пароль'; return; }
+  document.getElementById('authStatus').textContent = 'Вхожу…';
+  const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+  if (error) document.getElementById('authStatus').textContent = 'Ошибка: ' + error.message;
+  // успех подхватит onAuthStateChange
+}
+
+async function authSignUp() {
+  if (!sb) { toast('Supabase не загрузился — проверьте интернет'); return; }
+  const email = document.getElementById('authEmail').value.trim();
+  const pass = document.getElementById('authPass').value;
+  if (!email || pass.length < 6) { document.getElementById('authStatus').textContent = 'Почта + пароль минимум 6 символов'; return; }
+  document.getElementById('authStatus').textContent = 'Создаю аккаунт…';
+  const { data, error } = await sb.auth.signUp({ email, password: pass });
+  if (error) { document.getElementById('authStatus').textContent = 'Ошибка: ' + error.message; return; }
+  if (data.session) document.getElementById('authStatus').textContent = 'Аккаунт создан!';
+  else document.getElementById('authStatus').textContent = 'Проверьте почту и подтвердите регистрацию, затем войдите.';
+}
+
+async function authSignOut() {
+  if (sb) await sb.auth.signOut();
+  // очищаем локально — чтобы на общем устройстве следующий не увидел чужого
+  try { localStorage.removeItem('kaloriya_v3'); } catch(e){}
+  state = { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, barcodeCache:{}, dishes:[], settings:{geminiKey:'',geminiModel:'gemini-2.5-flash'} };
+  ensureDefaults();
+  renderAll();
+}
+
+// загрузить данные пользователя из облака (источник правды при входе)
+async function loadCloud() {
+  if (!sb || !currentUser) return;
+  setSyncStatus('Загружаю данные…');
+  const { data, error } = await sb.from('user_data').select('data').eq('user_id', currentUser.id).maybeSingle();
+  if (error) { setSyncStatus('Ошибка загрузки: ' + error.message); return; }
+  if (data && data.data && Object.keys(data.data).length) {
+    state = data.data; ensureDefaults();
+    try { localStorage.setItem('kaloriya_v3', JSON.stringify(state)); } catch(e){}
+    setSyncStatus('✓ синхронизировано');
+  } else {
+    // первая загрузка аккаунта — поднимаем то, что есть локально, в облако
+    ensureDefaults();
+    await syncCloudNow();
+    setSyncStatus('✓ синхронизировано');
+  }
+  renderAll();
+}
+
+function syncCloud() {
+  clearTimeout(syncTimer);
+  setSyncStatus('сохраняю…');
+  syncTimer = setTimeout(syncCloudNow, 800);
+}
+async function syncCloudNow() {
+  if (!sb || !currentUser) return;
+  const { error } = await sb.from('user_data').upsert({ user_id: currentUser.id, data: state, updated_at: new Date().toISOString() });
+  setSyncStatus(error ? ('ошибка синхронизации: ' + error.message) : '✓ синхронизировано');
+}
+
 // ───────────────────────── INIT ─────────────────────────
 load();
 const now = new Date();
 document.getElementById('dateDisplay').textContent = now.toLocaleDateString('ru-RU',{weekday:'short',day:'2-digit',month:'2-digit',year:'2-digit'}).toUpperCase();
 document.getElementById('weightDate').value = todayKey();
 renderAll();
+
+if (sb) {
+  sb.auth.onAuthStateChange((event, session) => {
+    if (session && session.user) {
+      const changed = !currentUser || currentUser.id !== session.user.id;
+      currentUser = session.user;
+      document.getElementById('accountEmail').textContent = session.user.email || '—';
+      showAuth(false);
+      if (changed) loadCloud();
+    } else {
+      currentUser = null;
+      document.getElementById('accountEmail').textContent = '—';
+      showAuth(true);
+    }
+  });
+} else {
+  // нет сети/CDN — работаем локально, без облака
+  toast('Облако недоступно — работаю локально');
+}
 </script>
 </body>
 </html>
