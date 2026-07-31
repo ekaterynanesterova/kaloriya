@@ -1,5 +1,5 @@
 // KALORIYA service worker: офлайн-режим + быстрый старт
-const CACHE = 'kaloriya-v1';
+const CACHE = 'kaloriya-v2';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
@@ -33,12 +33,22 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Остальное (иконки, шрифты, supabase-js) — из кэша, иначе из сети
-  e.respondWith(
-    caches.match(req).then(r => r || fetch(req).then(res => {
+  // Остальное (иконки, шрифты, supabase-js, сканер) — из кэша, иначе из сети
+  e.respondWith((async () => {
+    const cached = await caches.match(req);
+    if (cached) return cached;
+    try {
+      const res = await fetch(req);
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
       return res;
-    }).catch(() => r))
-  );
+    } catch (err) {
+      return Response.error();
+    }
+  })());
+});
+
+// Команда со страницы: применить обновление немедленно
+self.addEventListener('message', (e) => {
+  if (e.data === 'skip-waiting') self.skipWaiting();
 });

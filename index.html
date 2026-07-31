@@ -428,6 +428,11 @@
     </div>
     <button class="btn outline small" onclick="authSignOut()" style="margin-top:10px">ВЫЙТИ ИЗ АККАУНТА</button>
 
+    <div class="section-label" style="margin-top:32px"><span class="sl-text">приложение</span></div>
+    <div id="versionInfo" style="font-size:.66rem;color:var(--text-dim);margin-bottom:10px"></div>
+    <button class="btn outline small" onclick="forceRefresh()">⟳ ОБНОВИТЬ ПРИЛОЖЕНИЕ</button>
+    <div class="hint" style="margin-top:8px">Обновления ставятся сами при запуске. Кнопка нужна, если что-то подвисло: чистит кэш и перезагружает. Данные не пострадают — они в облаке.</div>
+
     <div class="section-label" style="margin-top:32px"><span class="sl-text">системные операции</span></div>
     <button class="btn danger small" onclick="resetAll()" style="margin-top:8px">СБРОСИТЬ ВСЕ ДАННЫЕ</button>
   </div>
@@ -1771,7 +1776,7 @@ function switchTab(name, btn) {
   btn.classList.add('active');
   if (name==='weight') renderWeight();
   if (name==='history') renderHistory();
-  if (name==='goals') { loadGoalsUI(); renderProgress(); }
+  if (name==='goals') { loadGoalsUI(); renderProgress(); renderVersionInfo(); }
 }
 
 function renderAll() { renderToday(); renderQuickFoods(); renderDishes(); }
@@ -1970,9 +1975,58 @@ window.addEventListener('focus', onAppFocus);
 setInterval(() => { if (!document.hidden) onAppFocus(); }, 60000);
 window.addEventListener('beforeunload', () => { if (dirty) syncCloudNow(); });
 
-// PWA: можно добавить на главный экран телефона и открывать без браузера / офлайн
+// PWA: иконка на главном экране, работа офлайн + автообновление версии
+let swReg = null;
+let reloadingForUpdate = false;
+
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
+  window.addEventListener('load', async () => {
+    try {
+      swReg = await navigator.serviceWorker.register('sw.js');
+      // появилась новая версия — применяем сразу
+      swReg.addEventListener('updatefound', () => {
+        const nw = swReg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) nw.postMessage('skip-waiting');
+        });
+      });
+      // проверяем обновления при каждом возврате в приложение
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && swReg) swReg.update().catch(()=>{}); });
+      window.addEventListener('focus', () => { if (swReg) swReg.update().catch(()=>{}); });
+    } catch(e) {}
+  });
+
+  // новая версия вступила в силу — перезагружаем страницу один раз
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloadingForUpdate) return;
+    reloadingForUpdate = true;
+    location.reload();
+  });
+}
+
+// Кнопка «Обновить приложение» в настройках: чистит кэш и перезагружает
+async function forceRefresh() {
+  toast('Обновляю…');
+  try {
+    if (dirty) await syncCloudNow();                     // не теряем несохранённое
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    if (swReg) await swReg.update().catch(()=>{});
+  } catch(e) {}
+  reloadingForUpdate = true;
+  location.reload();
+}
+
+function renderVersionInfo() {
+  const el = document.getElementById('versionInfo');
+  if (!el) return;
+  const d = new Date(document.lastModified);
+  const stamp = isNaN(d) ? '—' : d.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' });
+  const mode = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone ? 'приложение' : 'браузер';
+  el.textContent = `Версия от ${stamp} · режим: ${mode}`;
 }
 </script>
 </body>
