@@ -60,13 +60,11 @@
   .date-nav-btn:disabled { opacity:.25; cursor:not-allowed; }
   .date-nav-input { max-width:160px; flex:0; padding:7px 10px; font-size:.74rem; }
   .date-nav-label { font-size:.66rem; letter-spacing:.14em; text-transform:uppercase; color:var(--cyan); text-shadow:0 0 8px rgba(0,255,224,.4); }
-  .today-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:16px; }
-  @media (max-width:600px) { .today-grid { grid-template-columns:1fr; } }
+  .today-grid { margin-top:16px; }
   .stat-card { border:1px solid var(--border); background:var(--panel); padding:18px; position:relative; overflow:hidden; }
   .stat-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:var(--cyan); box-shadow:var(--cyan-glow); }
-  .stat-card.alt::before { background:var(--magenta); box-shadow:var(--magenta-glow); }
   .card-label { font-size:.65rem; letter-spacing:.2em; color:var(--text-dim); margin-bottom:10px; }
-  .stat-number { font-family:'Orbitron',monospace; font-size:2.8rem; font-weight:700; line-height:1; color:var(--cyan); text-shadow:0 0 20px rgba(0,255,224,.4); }
+  .stat-number { font-family:'Orbitron',monospace; font-size:2.1rem; font-weight:700; line-height:1; color:var(--cyan); text-shadow:0 0 20px rgba(0,255,224,.4); }
   .stat-unit { font-size:.7rem; color:var(--text-dim); margin-left:4px; }
   .stat-sub { font-size:.69rem; color:var(--text-dim); margin-top:8px; }
   .progress-wrap { margin-top:12px; height:4px; background:var(--bg3); border:1px solid var(--border); overflow:hidden; }
@@ -132,15 +130,16 @@
   .quick-chip:hover { border-color:var(--cyan); color:var(--cyan); background:var(--cyan-dim); text-shadow:0 0 6px rgba(0,255,224,.4); }
   .quick-chip b { color:var(--green); font-weight:normal; }
 
-  .mini-chart-wrap { margin-top:10px; }
-  .mini-chart-legend { display:flex; gap:12px; margin-top:4px; font-size:.62rem; color:var(--text-dim); }
-  .mini-chart-legend i { font-style:normal; }
-  .lg-kcal::before { content:'▮ '; color:var(--cyan); }
-  .lg-weight::before { content:'— '; color:var(--yellow); }
+  /* главная: калории и вес двумя графиками друг под другом в одной плашке */
+  .kcal-headline { display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .kcal-headline .stat-sub { text-align:right; line-height:1.5; }
+  .main-charts { margin-top:12px; display:flex; flex-direction:column; gap:7px; }
+  .chart-row-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; font-size:.63rem; letter-spacing:.1em; text-transform:uppercase; color:var(--text-dim); margin-bottom:1px; }
+  .chart-row-head .crh-goal { letter-spacing:.06em; text-transform:none; color:var(--text-dim); }
+  .chart-row canvas { display:block; }
+  .today-footer { display:flex; flex-wrap:wrap; gap:4px 18px; margin-top:11px; padding-top:9px; border-top:1px solid var(--border); font-size:.7rem; color:var(--text-dim); }
+  .today-footer b { font-family:'Orbitron',monospace; font-size:.88rem; color:var(--green); font-weight:700; }
 
-  .macros-row { display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; }
-  .macro-pill { font-size:.67rem; letter-spacing:.1em; text-transform:uppercase; padding:4px 10px; border:1px solid var(--border); background:var(--bg3); color:var(--text-dim); }
-  .macro-pill span { font-family:'Orbitron',monospace; font-size:.82rem; color:var(--green); font-weight:700; }
 
   .chart-wrap { margin-top:20px; border:1px solid var(--border); background:var(--panel); padding:20px; position:relative; }
   .chart-wrap::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,var(--cyan),var(--magenta)); }
@@ -150,8 +149,6 @@
   .period-btn { font-family:'Share Tech Mono',monospace; font-size:.65rem; letter-spacing:.08em; padding:5px 10px; border:1px solid var(--border); background:var(--bg2); color:var(--text-dim); cursor:pointer; transition:all .15s; }
   .period-btn:hover:not(.active) { border-color:rgba(0,255,224,.35); color:var(--text); }
   .period-btn.active { border-color:var(--cyan); background:var(--cyan-dim); color:var(--cyan); text-shadow:0 0 8px rgba(0,255,224,.4); }
-  .chart-legend { display:flex; gap:16px; margin-top:10px; font-size:.65rem; color:var(--text-dim); }
-  .chart-legend i { font-style:normal; }
   .chart-summary { margin-top:12px; padding:10px 12px; border:1px solid var(--border); background:var(--bg2); font-size:.72rem; color:var(--text); line-height:1.6; }
   .chart-summary:empty { display:none; }
   .chart-summary b { font-family:'Orbitron',monospace; color:var(--cyan); text-shadow:0 0 8px rgba(0,255,224,.35); }
@@ -300,23 +297,28 @@
     <div class="today-grid">
       <div class="stat-card">
         <div class="card-label" id="dayCardLabel">// калории · сегодня</div>
-        <div><span class="stat-number" id="todayKcal">0</span><span class="stat-unit">ккал</span></div>
-        <div class="stat-sub">из <span id="goalDisplay">2000</span> · осталось <span id="remainKcal">2000</span></div>
+        <div class="kcal-headline">
+          <div><span class="stat-number" id="todayKcal">0</span><span class="stat-unit">ккал</span></div>
+          <div class="stat-sub">из <span id="goalDisplay">2000</span><br>осталось <span id="remainKcal">2000</span></div>
+        </div>
         <div class="progress-wrap"><div class="progress-bar" id="kcalBar" style="width:0%"></div></div>
-        <div class="mini-chart-wrap">
-          <canvas id="miniChart"></canvas>
-          <div class="mini-chart-legend"><i class="lg-kcal">ккал</i><i class="lg-weight" id="miniLegendWeight" style="display:none">вес</i></div>
+
+        <div class="main-charts">
+          <div class="chart-row">
+            <div class="chart-row-head"><span>калории · <span id="chartDaysLabel">14</span> дней</span><span class="crh-goal" id="chartGoalNote"></span></div>
+            <canvas id="miniChart"></canvas>
+          </div>
+          <div class="chart-row" id="weightRow">
+            <div class="chart-row-head"><span>вес, кг</span><span class="crh-goal" id="weightTrendNote"></span></div>
+            <canvas id="miniWeightChart"></canvas>
+          </div>
         </div>
-      </div>
-      <div class="stat-card alt">
-        <div class="card-label">// макронутриенты</div>
-        <div class="macros-row">
-          <div class="macro-pill">Б <span id="todayProt">0</span>г</div>
-          <div class="macro-pill">Ж <span id="todayFat">0</span>г</div>
-          <div class="macro-pill">У <span id="todayCarb">0</span>г</div>
+
+        <div class="today-footer">
+          <span>Белок <b id="todayProt">0</b> г</span>
+          <span><span id="countLabel">записей</span> <b id="todayCount">0</b></span>
+          <span id="weightToday"></span>
         </div>
-        <div class="stat-sub" style="margin-top:16px"><span id="countLabel">Записей сегодня:</span> <span id="todayCount">0</span></div>
-        <div class="stat-sub" id="weightToday" style="margin-top:4px"></div>
       </div>
     </div>
 
@@ -377,19 +379,15 @@
     <div class="weight-add-row">
       <input class="inp" id="weightInput" type="number" placeholder="масса тела, кг" step="0.1" style="max-width:180px">
       <input class="inp" id="weightDate" type="date" style="max-width:160px">
-      <button class="btn" onclick="addWeight()">+ LOG</button>
+      <button class="btn" onclick="addWeight()">+ ЗАПИСАТЬ</button>
     </div>
     <div class="chart-wrap" style="margin-top:24px">
       <div class="chart-head">
-        <div class="chart-title" style="margin-bottom:0">// динамика: калории и вес</div>
+        <div class="chart-title" style="margin-bottom:0">// динамика массы тела</div>
         <div class="period-switch" id="periodSwitch"></div>
       </div>
       <canvas id="weightChart" height="200"></canvas>
       <div class="empty" id="chartEmpty" style="display:none">&gt; нет данных за этот период</div>
-      <div class="chart-legend">
-        <i class="lg-kcal">калории за день</i>
-        <i class="lg-weight">вес, кг</i>
-      </div>
       <div class="chart-summary" id="chartSummary"></div>
     </div>
     <div class="section-label"><span class="sl-text">журнал замеров</span></div>
@@ -713,8 +711,6 @@ function renderToday() {
   const items = state.entries[key] || [];
   const totalKcal = items.reduce((s,i)=>s+(i.kcal||0),0);
   const totalProt = items.reduce((s,i)=>s+(i.prot||0),0);
-  const totalFat  = items.reduce((s,i)=>s+(i.fat||0),0);
-  const totalCarb = items.reduce((s,i)=>s+(i.carb||0),0);
   const goal = state.goals.kcal || 2000;
   const pct = Math.min(100, Math.round(totalKcal/goal*100));
 
@@ -722,8 +718,6 @@ function renderToday() {
   document.getElementById('goalDisplay').textContent = goal;
   document.getElementById('remainKcal').textContent = Math.max(0, goal-totalKcal);
   document.getElementById('todayProt').textContent = Math.round(totalProt);
-  document.getElementById('todayFat').textContent  = Math.round(totalFat);
-  document.getElementById('todayCarb').textContent = Math.round(totalCarb);
   document.getElementById('todayCount').textContent = items.length;
   renderDateNav();
 
@@ -732,7 +726,7 @@ function renderToday() {
   bar.className = 'progress-bar'+(pct>=100?' over':'');
 
   const lastW = state.weights.length ? state.weights[state.weights.length-1] : null;
-  document.getElementById('weightToday').textContent = lastW ? `Последний вес: ${lastW.kg} кг [${lastW.date}]` : 'Вес не записан';
+  document.getElementById('weightToday').textContent = lastW ? `вес ${lastW.kg} кг · ${humanDate(lastW.date)}` : 'вес не записан';
 
   renderMealBar();
   renderFoodList(items, key);
@@ -774,7 +768,7 @@ function renderDateNav() {
   const card = document.getElementById('dayCardLabel');
   if (card) card.textContent = '// калории · ' + humanDate(selectedDate);
   const cnt = document.getElementById('countLabel');
-  if (cnt) cnt.textContent = 'Записей за ' + humanDate(selectedDate) + ':';
+  if (cnt) cnt.textContent = 'записей';
 }
 
 function setSelectedDate(key) {
@@ -820,13 +814,47 @@ function earliestDataKey() {
   return keys.length ? keys.sort()[0] : todayKey();
 }
 
+const MAIN_CHART_DAYS = 14;
+
+// Два графика друг под другом на общей оси дат: калории и вес
 function renderMiniBars() {
-  const canvas = document.getElementById('miniChart');
-  if (!canvas) return;
-  const series = buildDaySeries(shiftKey(todayKey(), -6), todayKey());
-  drawCombinedChart(canvas, series, { compact: true, highlight: selectedDate });
-  const lg = document.getElementById('miniLegendWeight');
-  if (lg) lg.style.display = series.some(d => d.kg != null) ? 'inline' : 'none';
+  const kcalCanvas = document.getElementById('miniChart');
+  const wCanvas = document.getElementById('miniWeightChart');
+  if (!kcalCanvas || !wCanvas) return;
+
+  const series = buildDaySeries(shiftKey(todayKey(), -(MAIN_CHART_DAYS-1)), todayKey());
+  const daysLabel = document.getElementById('chartDaysLabel');
+  if (daysLabel) daysLabel.textContent = MAIN_CHART_DAYS;
+
+  // график калорий: столбики + пунктир дневной нормы
+  drawCombinedChart(kcalCanvas, series, { compact:true, mode:'kcal', highlight:selectedDate, showDates:false });
+  const goal = state.goals.kcal || 0;
+  const note = document.getElementById('chartGoalNote');
+  if (note) note.textContent = goal ? `норма ${goal}` : '';
+
+  // график веса: линия по датам
+  const weighed = series.filter(d => d.kg != null);
+  const row = document.getElementById('weightRow');
+  if (!state.weights.length) {
+    if (row) row.style.display = 'none';
+  } else {
+    if (row) row.style.display = 'block';
+    // если в окно графика не попал ни один замер — холст пустой, показываем только подпись
+    wCanvas.style.display = weighed.length ? 'block' : 'none';
+    if (weighed.length) drawCombinedChart(wCanvas, series, { compact:true, mode:'weight', showDates:true });
+    const trend = document.getElementById('weightTrendNote');
+    if (trend) {
+      if (weighed.length >= 2) {
+        const diff = +(weighed[weighed.length-1].kg - weighed[0].kg).toFixed(1);
+        trend.innerHTML = `${weighed[0].kg} → <b style="color:var(--yellow)">${weighed[weighed.length-1].kg}</b> (${diff>0?'+':'−'}${Math.abs(diff)})`;
+      } else if (weighed.length === 1) {
+        trend.textContent = `${weighed[0].kg} кг`;
+      } else {
+        const last = state.weights[state.weights.length-1];
+        trend.textContent = `последний замер ${last.kg} кг · ${humanDate(last.date)}`;
+      }
+    }
+  }
 }
 
 // ───────────────────────── QUICK ADD (frequency-based) ─────────────────────────
@@ -1643,30 +1671,29 @@ function renderPeriodSwitch() {
 function renderChartSummary(series) {
   const el = document.getElementById('chartSummary');
   if (!el) return;
-  const withFood = series.filter(d => d.kcal > 0);
   const weighed = series.filter(d => d.kg != null);
-  const parts = [];
 
-  if (withFood.length) {
-    const avg = Math.round(withFood.reduce((s,d)=>s+d.kcal,0) / withFood.length);
-    const goal = state.goals.kcal || 0;
-    const vsGoal = goal ? ` (цель ${goal})` : '';
-    parts.push(`в среднем <b>${avg}</b> ккал/день${vsGoal} за ${withFood.length} ${plural(withFood.length,'день','дня','дней')} с записями`);
-  } else {
-    parts.push('за этот период нет записей о еде');
+  if (!weighed.length) {
+    el.innerHTML = '&gt; замеров за этот период нет';
+    return;
+  }
+  if (weighed.length === 1) {
+    el.innerHTML = `&gt; один замер: <b>${weighed[0].kg} кг</b> — добавьте ещё, чтобы увидеть динамику`;
+    return;
   }
 
-  if (weighed.length >= 2) {
-    const diff = +(weighed[weighed.length-1].kg - weighed[0].kg).toFixed(1);
-    const cls = diff > 0 ? 'up' : 'down';
-    const sign = diff > 0 ? '+' : '−';
-    parts.push(`вес <span class="${cls}">${sign}${Math.abs(diff)} кг</span> (${weighed[0].kg} → ${weighed[weighed.length-1].kg})`);
-  } else if (weighed.length === 1) {
-    parts.push(`вес записан один раз: <b>${weighed[0].kg} кг</b> — нужен ещё замер, чтобы увидеть динамику`);
-  } else {
-    parts.push('замеров веса за период нет — добавьте, чтобы сопоставить с питанием');
+  const first = weighed[0], last = weighed[weighed.length-1];
+  const diff = +(last.kg - first.kg).toFixed(1);
+  const cls = diff > 0 ? 'up' : 'down';
+  const sign = diff > 0 ? '+' : '−';
+  const parts = [
+    `<span class="${cls}">${sign}${Math.abs(diff)} кг</span> за период (${first.kg} → ${last.kg})`,
+    `замеров: <b>${weighed.length}</b>`
+  ];
+  if (state.goals.weight) {
+    const left = +(last.kg - state.goals.weight).toFixed(1);
+    parts.push(left > 0 ? `до цели ${state.goals.weight} кг осталось <b>${left}</b>` : `цель ${state.goals.weight} кг достигнута`);
   }
-
   el.innerHTML = '&gt; ' + parts.join(' · ');
 }
 
@@ -1687,13 +1714,13 @@ function renderWeight() {
   renderPeriodSwitch();
   const { from, to } = periodRange();
   const series = buildDaySeries(from, to);
-  const hasAny = series.some(d => d.kcal > 0 || d.kg != null);
+  const hasWeighIns = series.some(d => d.kg != null);
 
-  if (!hasAny) {
+  if (!hasWeighIns) {
     canvas.style.display='none'; empty.style.display='block';
   } else {
     canvas.style.display='block'; empty.style.display='none';
-    drawCombinedChart(canvas, series, {});
+    drawCombinedChart(canvas, series, { mode:'weight' });
   }
   renderChartSummary(series);
 
@@ -1722,7 +1749,7 @@ function drawCombinedChart(canvas, series, opts) {
   const avail = (canvas.parentElement && canvas.parentElement.clientWidth) || 0;
   if (!avail) return; // панель скрыта — перерисуем, когда станет видимой (switchTab)
   const W = Math.max(160, compact ? avail : avail - 40);
-  const H = compact ? 68 : 190;
+  const H = compact ? (opts.showDates !== false ? 52 : 44) : 190;
   canvas.width = W*dpr; canvas.height = H*dpr;
   canvas.style.width = W+'px'; canvas.style.height = H+'px';
   const ctx = canvas.getContext('2d');
@@ -1731,13 +1758,17 @@ function drawCombinedChart(canvas, series, opts) {
   ctx.clearRect(0,0,W,H);
   if (!series.length) return;
 
+  const mode = opts.mode || 'both';
+  const showKcal = mode !== 'weight';
+  const showWeight = mode !== 'kcal';
   const goal = state.goals.kcal || 0;
   const weighed = series.filter(d => d.kg != null);
-  const hasWeight = weighed.length > 0;
+  const hasWeight = showWeight && weighed.length > 0;
+  const withDates = opts.showDates !== false;
 
   const pad = compact
-    ? { top:6, right:3, bottom:14, left:3 }
-    : { top:16, right: hasWeight ? 44 : 16, bottom:26, left:46 };
+    ? { top:5, right:4, bottom: withDates ? 14 : 4, left:4 }
+    : { top:16, right: (showKcal && hasWeight) ? 44 : 16, bottom:26, left: 46 };
   const cW = W - pad.left - pad.right;
   const cH = H - pad.top - pad.bottom;
   if (cW <= 4 || cH <= 4) return;
@@ -1748,7 +1779,7 @@ function drawCombinedChart(canvas, series, opts) {
   const barW = Math.max(2, Math.min(compact ? 16 : 26, (cW/Math.max(series.length,1))*0.6));
 
   // сетка и левая шкала (ккал)
-  if (!compact) {
+  if (!compact && showKcal) {
     ctx.strokeStyle = '#1A2535'; ctx.lineWidth = 1;
     ctx.font = "10px 'Share Tech Mono'";
     for (let i=0;i<=4;i++) {
@@ -1760,7 +1791,7 @@ function drawCombinedChart(canvas, series, opts) {
   }
 
   // столбики калорий
-  series.forEach((d,i) => {
+  if (showKcal) series.forEach((d,i) => {
     if (!d.kcal) return;
     const y = yKcal(d.kcal);
     const over = goal && d.kcal > goal;
@@ -1770,10 +1801,11 @@ function drawCombinedChart(canvas, series, opts) {
     ctx.fillRect(xOf(i)-barW/2, y, barW, pad.top+cH-y);
   });
 
-  // пунктир дневной нормы
-  if (goal && !compact) {
+  // пунктир дневной нормы — виден и на компактном графике, это главный ориентир
+  if (goal && showKcal) {
     const gy = yKcal(goal);
-    ctx.strokeStyle = 'rgba(0,255,224,.45)'; ctx.setLineDash([4,6]); ctx.lineWidth = 1;
+    ctx.strokeStyle = compact ? 'rgba(214,232,248,.55)' : 'rgba(0,255,224,.45)';
+    ctx.setLineDash([4,6]); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(pad.left,gy); ctx.lineTo(pad.left+cW,gy); ctx.stroke(); ctx.setLineDash([]);
   }
 
@@ -1790,10 +1822,18 @@ function drawCombinedChart(canvas, series, opts) {
     const yKg = (kg) => pad.top + cH - ((kg-minKg)/((maxKg-minKg)||1))*cH;
 
     if (!compact) {
-      ctx.font = "10px 'Share Tech Mono'"; ctx.textAlign = 'left'; ctx.fillStyle = '#A8BBCD';
+      // если калорий на графике нет — шкала веса слева и своя сетка
+      const onLeft = !showKcal;
+      ctx.font = "10px 'Share Tech Mono'";
       for (let i=0;i<=4;i++) {
         const y = pad.top + (i/4)*cH;
-        ctx.fillText((maxKg-(i/4)*(maxKg-minKg)).toFixed(1), pad.left+cW+6, y+4);
+        if (onLeft) {
+          ctx.strokeStyle = '#1A2535'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(pad.left,y); ctx.lineTo(pad.left+cW,y); ctx.stroke();
+        }
+        ctx.fillStyle = '#A8BBCD';
+        ctx.textAlign = onLeft ? 'right' : 'left';
+        ctx.fillText((maxKg-(i/4)*(maxKg-minKg)).toFixed(1), onLeft ? pad.left-6 : pad.left+cW+6, y+4);
       }
       if (state.goals.weight) {
         const gy = yKg(state.goals.weight);
@@ -1816,7 +1856,8 @@ function drawCombinedChart(canvas, series, opts) {
     pts.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, compact ? 2.2 : 3, 0, Math.PI*2); ctx.fill(); });
   }
 
-  // подписи дат
+  // подписи дат (на главной — только под нижним графиком)
+  if (!withDates) return;
   ctx.fillStyle = '#A8BBCD'; ctx.font = "9px 'Share Tech Mono'"; ctx.textAlign = 'center';
   const step = Math.max(1, Math.ceil(series.length/7));
   series.forEach((d,i) => {
