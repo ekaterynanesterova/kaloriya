@@ -1992,10 +1992,27 @@ function renderProgress() {
 }
 
 function resetAll() {
-  if (!confirm('Сбросить ВСЕ данные? Это действие необратимо.')) return;
-  state = { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, barcodeCache:{}, dishes:[], settings:{geminiKey:'',geminiModel:'gemini-2.5-flash'} };
-  ensureDefaults(); save(); renderAll();
-  toast('ALL_DATA_CLEARED');
+  const cloudNote = currentUser ? '\n\nДанные удалятся и в облаке — на всех ваших устройствах.' : '';
+  if (!confirm('Удалить все записи о еде, замеры веса, свои блюда и цели?' + cloudNote + '\n\nGemini-ключ сохранится. Отменить будет нельзя.')) return;
+
+  const keepSettings = Object.assign({}, state.settings); // ключ терять незачем — его пришлось бы заново брать в Google AI Studio
+  state = freshState();
+  state.settings = keepSettings;
+  ensureDefaults();
+
+  // сбрасываем и то, что показывается на экране
+  selectedDate = todayKey();
+  currentMeal = autoMeal();
+  chartPeriod = 30;
+  openHistoryDays.clear();
+  resetForm();
+
+  save();
+  renderAll();
+  if (document.getElementById('panel-weight').classList.contains('active')) renderWeight();
+  if (document.getElementById('panel-history').classList.contains('active')) renderHistory();
+  renderProgress();
+  toast('Все данные удалены');
 }
 
 // ───────────────────────── TABS ─────────────────────────
