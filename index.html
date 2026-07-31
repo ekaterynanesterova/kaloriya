@@ -3,7 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>KALORIYA.SYS</title>
+<title>KALORIYA</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#080C10">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="KALORIYA">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
@@ -45,7 +53,13 @@
 
   .panel { display:none; } .panel.active { display:block; animation: fadeUp .3s ease both; }
 
-  .today-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:24px; }
+  .date-nav { display:flex; align-items:center; gap:8px; margin-top:20px; flex-wrap:wrap; }
+  .date-nav-btn { width:34px; height:34px; min-width:34px; border:1px solid var(--border); background:var(--bg2); color:var(--text-dim); cursor:pointer; font-size:.75rem; transition:all .15s; }
+  .date-nav-btn:hover:not(:disabled) { border-color:var(--cyan); color:var(--cyan); }
+  .date-nav-btn:disabled { opacity:.25; cursor:not-allowed; }
+  .date-nav-input { max-width:160px; flex:0; padding:7px 10px; font-size:.74rem; }
+  .date-nav-label { font-size:.66rem; letter-spacing:.14em; text-transform:uppercase; color:var(--cyan); text-shadow:0 0 8px rgba(0,255,224,.4); }
+  .today-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:16px; }
   @media (max-width:600px) { .today-grid { grid-template-columns:1fr; } }
   .stat-card { border:1px solid var(--border); background:var(--panel); padding:18px; position:relative; overflow:hidden; }
   .stat-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:var(--cyan); box-shadow:var(--cyan-glow); }
@@ -162,6 +176,10 @@
 
   .empty { text-align:center; padding:30px 20px; color:var(--text-dim); font-size:.68rem; letter-spacing:.08em; border:1px dashed var(--border); margin-top:10px; }
 
+  .busy-pill { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%) scale(.96); z-index:600; display:none; align-items:center; gap:10px; padding:14px 22px; border:1px solid var(--cyan); background:var(--panel); box-shadow:0 0 30px rgba(0,255,224,.25); font-size:.76rem; color:var(--cyan); letter-spacing:.06em; text-shadow:0 0 8px rgba(0,255,224,.4); transition:transform .2s, opacity .2s; opacity:0; }
+  .busy-pill.show { display:flex; opacity:1; transform:translate(-50%,-50%) scale(1); }
+  .busy-spinner { width:16px; height:16px; min-width:16px; border:2px solid rgba(0,255,224,.25); border-top-color:var(--cyan); border-radius:50%; animation:spin .7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
   .toast { position:fixed; bottom:24px; right:24px; left:24px; max-width:420px; margin-left:auto; background:var(--bg3); color:var(--cyan); font-size:.7rem; letter-spacing:.06em; padding:10px 18px; border:1px solid rgba(0,255,224,.4); box-shadow:var(--cyan-glow); text-shadow:0 0 8px var(--cyan); opacity:0; transform:translateY(10px); transition:all .3s; pointer-events:none; z-index:999; }
   .toast.show { opacity:1; transform:translateY(0); }
 
@@ -227,9 +245,17 @@
 
   <!-- TODAY -->
   <div id="panel-today" class="panel active">
+    <div class="date-nav">
+      <button class="date-nav-btn" onclick="shiftSelectedDate(-1)" title="предыдущий день">◀</button>
+      <input class="inp date-nav-input" id="dayPicker" type="date" onchange="setSelectedDate(this.value)">
+      <button class="date-nav-btn" id="dayNextBtn" onclick="shiftSelectedDate(1)" title="следующий день">▶</button>
+      <span class="date-nav-label" id="dayLabel"></span>
+      <button class="btn outline small" id="backToTodayBtn" onclick="setSelectedDate(todayKey())" style="display:none">сегодня</button>
+      <button class="btn outline small" onclick="repeatPrevDay()" title="перенести записи прошлого дня">↻ повторить вчера</button>
+    </div>
     <div class="today-grid">
       <div class="stat-card">
-        <div class="card-label">// калории · сегодня</div>
+        <div class="card-label" id="dayCardLabel">// калории · сегодня</div>
         <div><span class="stat-number" id="todayKcal">0</span><span class="stat-unit">ккал</span></div>
         <div class="stat-sub">из <span id="goalDisplay">2000</span> · осталось <span id="remainKcal">2000</span></div>
         <div class="progress-wrap"><div class="progress-bar" id="kcalBar" style="width:0%"></div></div>
@@ -242,7 +268,7 @@
           <div class="macro-pill">Ж <span id="todayFat">0</span>г</div>
           <div class="macro-pill">У <span id="todayCarb">0</span>г</div>
         </div>
-        <div class="stat-sub" style="margin-top:16px">Записей сегодня: <span id="todayCount">0</span></div>
+        <div class="stat-sub" style="margin-top:16px"><span id="countLabel">Записей сегодня:</span> <span id="todayCount">0</span></div>
         <div class="stat-sub" id="weightToday" style="margin-top:4px"></div>
       </div>
     </div>
@@ -375,6 +401,7 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="busy-pill" id="busyPill"><span class="busy-spinner"></span><span id="busyText">Анализирую…</span></div>
 
 <!-- BARCODE SCANNER OVERLAY -->
 <div class="overlay" id="scannerOverlay">
@@ -396,10 +423,34 @@
     <div class="review-meal-row">
       <span class="review-meal-label">Приём пищи</span>
       <select class="inp" id="reviewMeal" style="flex:1"></select>
+      <span class="review-meal-label" id="reviewDateNote"></span>
     </div>
     <div id="reviewList"></div>
     <button class="btn" onclick="confirmReview()" style="width:100%;margin-top:14px">+ ДОБАВИТЬ ВСЁ (<span id="reviewCount">0</span>)</button>
     <div class="hint" style="margin-top:8px">≈ оценка — порцию прикинул AI, проверьте количество. Меняешь количество — КБЖУ пересчитывается автоматически. Лишнее убери крестиком.</div>
+  </div>
+</div>
+
+<!-- РЕДАКТИРОВАНИЕ ЗАПИСИ -->
+<div class="overlay" id="editOverlay">
+  <div class="overlay-box" style="max-width:460px">
+    <div class="overlay-title"><span>// ИЗМЕНИТЬ ЗАПИСЬ</span><span class="overlay-close" onclick="closeEditEntry()">✕ отмена</span></div>
+    <input class="inp" id="editName" placeholder="название" style="width:100%;margin-bottom:8px">
+    <div class="input-row" style="margin-bottom:8px">
+      <input class="inp" id="editAmount" type="number" min="0" step="any" placeholder="количество" style="max-width:110px" oninput="editRecalc()">
+      <select class="inp" id="editUnit" style="max-width:80px">
+        <option value="g">г</option><option value="ml">мл</option><option value="pcs">шт</option>
+      </select>
+      <select class="inp" id="editMeal" style="flex:1"></select>
+    </div>
+    <div class="manual-grid">
+      <div><label>Ккал</label><input class="inp" id="editKcal" type="number" min="0"></div>
+      <div><label>Белки г</label><input class="inp" id="editProt" type="number" min="0"></div>
+      <div><label>Жиры г</label><input class="inp" id="editFat" type="number" min="0"></div>
+      <div><label>Углев г</label><input class="inp" id="editCarb" type="number" min="0"></div>
+    </div>
+    <div class="hint" style="margin-top:8px">Меняешь количество — КБЖУ пересчитывается автоматически. Можно поправить и вручную.</div>
+    <button class="btn" onclick="saveEditEntry()" style="width:100%;margin-top:12px">СОХРАНИТЬ</button>
   </div>
 </div>
 
@@ -478,7 +529,20 @@ function autoMeal() {
   return 'snack';
 }
 
-const todayKey = () => new Date().toISOString().split('T')[0];
+// ВАЖНО: дата считается по ЛОКАЛЬНОМУ времени (toISOString давал UTC — ночная еда уезжала во вчера)
+const dateKey = (d) => {
+  const x = d ? new Date(d) : new Date();
+  return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+};
+const todayKey = () => dateKey();
+const shiftKey = (key, days) => { const [y,m,d] = key.split('-').map(Number); const x = new Date(y, m-1, d); x.setDate(x.getDate()+days); return dateKey(x); };
+const humanDate = (key) => {
+  if (key === todayKey()) return 'сегодня';
+  if (key === shiftKey(todayKey(), -1)) return 'вчера';
+  const [y,m,d] = key.split('-').map(Number);
+  return new Date(y, m-1, d).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' });
+};
+let selectedDate = todayKey(); // день, который сейчас смотрим/заполняем
 const normKey = (name) => name.trim().toLowerCase();
 
 const SEED_PRODUCTS = [
@@ -552,7 +616,7 @@ function toast(msg) {
 
 // ───────────────────────── MEAL BAR ─────────────────────────
 function renderMealBar() {
-  const key = todayKey();
+  const key = selectedDate;
   const items = state.entries[key] || [];
   document.getElementById('mealBar').innerHTML = MEALS.map(m => {
     const sub = items.filter(i => i.meal === m.key).reduce((s,i) => s+(i.kcal||0), 0);
@@ -577,7 +641,7 @@ function setCurrentMeal(key) {
 
 // ───────────────────────── TODAY RENDER ─────────────────────────
 function renderToday() {
-  const key = todayKey();
+  const key = selectedDate;
   const items = state.entries[key] || [];
   const totalKcal = items.reduce((s,i)=>s+(i.kcal||0),0);
   const totalProt = items.reduce((s,i)=>s+(i.prot||0),0);
@@ -593,6 +657,7 @@ function renderToday() {
   document.getElementById('todayFat').textContent  = Math.round(totalFat);
   document.getElementById('todayCarb').textContent = Math.round(totalCarb);
   document.getElementById('todayCount').textContent = items.length;
+  renderDateNav();
 
   const bar = document.getElementById('kcalBar');
   bar.style.width = pct+'%';
@@ -608,9 +673,9 @@ function renderToday() {
   renderDishes();
 }
 
-function renderFoodList(items, dateKey) {
+function renderFoodList(items, dayKey) {
   const list = document.getElementById('foodList');
-  if (!items.length) { list.innerHTML = '<div class="empty">&gt; BUFFER_EMPTY — нет записей за сегодня</div>'; return; }
+  if (!items.length) { list.innerHTML = `<div class="empty">&gt; нет записей за ${humanDate(dayKey)}</div>`; return; }
   let html = '';
   MEALS.forEach(m => {
     const group = items.map((it,idx)=>({it,idx})).filter(x => x.it.meal === m.key);
@@ -619,24 +684,59 @@ function renderFoodList(items, dateKey) {
     html += `<div class="meal-group-header"><span>${m.icon} ${m.label}</span><span class="mgh-kcal">${sub} ккал</span></div>`;
     html += group.map(({it,idx}) => `
       <div class="food-item">
-        <div class="food-name">${it.name}</div>
+        <div class="food-name">${escAttr(it.name)}</div>
         ${it.amount ? `<div class="food-amount">${it.amount} ${UNIT_LABEL[it.unit]||''}</div>` : ''}
         <div class="food-kcal">${it.kcal}</div>
-        <button class="food-del" onclick="removeFood('${dateKey}',${idx})">✕</button>
+        <button class="food-del" title="изменить" onclick="openEditEntry('${dayKey}',${idx})" style="color:var(--cyan)">✎</button>
+        <button class="food-del" title="удалить" onclick="removeFood('${dayKey}',${idx})">✕</button>
       </div>`).join('');
   });
   list.innerHTML = html;
 }
 
+function renderDateNav() {
+  const picker = document.getElementById('dayPicker');
+  if (picker) { picker.value = selectedDate; picker.max = todayKey(); }
+  const lbl = document.getElementById('dayLabel');
+  if (lbl) lbl.textContent = humanDate(selectedDate);
+  const next = document.getElementById('dayNextBtn');
+  if (next) next.disabled = selectedDate >= todayKey();
+  const back = document.getElementById('backToTodayBtn');
+  if (back) back.style.display = selectedDate === todayKey() ? 'none' : 'inline-block';
+  const card = document.getElementById('dayCardLabel');
+  if (card) card.textContent = '// калории · ' + humanDate(selectedDate);
+  const cnt = document.getElementById('countLabel');
+  if (cnt) cnt.textContent = 'Записей за ' + humanDate(selectedDate) + ':';
+}
+
+function setSelectedDate(key) {
+  if (!key) return;
+  if (key > todayKey()) key = todayKey(); // будущее не заполняем
+  selectedDate = key;
+  renderToday();
+}
+function shiftSelectedDate(days) { setSelectedDate(shiftKey(selectedDate, days)); }
+
+// перенести записи предыдущего дня в выбранный (через экран подтверждения)
+function repeatPrevDay() {
+  const prev = shiftKey(selectedDate, -1);
+  const items = state.entries[prev] || [];
+  if (!items.length) { toast(`За ${humanDate(prev)} нет записей`); return; }
+  openReview(items.map(it => {
+    const amt = it.amount || 1;
+    return { name:it.name, amount:amt, unit:it.unit||'g', kcal:it.kcal||0, prot:it.prot||0, fat:it.fat||0, carb:it.carb||0,
+             meal:it.meal, assumed:false,
+             per1:{ kcal:(it.kcal||0)/amt, prot:(it.prot||0)/amt, fat:(it.fat||0)/amt, carb:(it.carb||0)/amt } };
+  }));
+}
+
 function renderMiniBars() {
   const goal = state.goals.kcal || 2000;
-  const today = todayKey();
   const days = [];
   for (let i=6;i>=0;i--) {
-    const d = new Date(); d.setDate(d.getDate()-i);
-    const k = d.toISOString().split('T')[0];
+    const k = shiftKey(todayKey(), -i);
     const kcal = (state.entries[k]||[]).reduce((s,it)=>s+(it.kcal||0),0);
-    days.push({k,kcal,isToday:k===today});
+    days.push({k,kcal,isToday:k===selectedDate});
   }
   const max = Math.max(goal, ...days.map(d=>d.kcal), 1);
   document.getElementById('miniBars').innerHTML = days.map(d => {
@@ -943,9 +1043,9 @@ function fillFormFromAuto(result, source) {
 }
 
 function pushEntry(entry) {
-  const key = todayKey();
+  const key = selectedDate; // пишем в выбранный день, а не всегда в сегодня
   if (!state.entries[key]) state.entries[key] = [];
-  entry.id = key+'-'+Date.now();
+  entry.id = key+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
   state.entries[key].push(entry);
   save();
   renderToday();
@@ -998,8 +1098,62 @@ function resetForm() {
 }
 
 function removeFood(key, idx) {
+  if (!state.entries[key]) return;
   state.entries[key].splice(idx,1);
   save(); renderToday();
+  if (document.getElementById('panel-history').classList.contains('active')) renderHistory();
+}
+
+// ───────────────────────── РЕДАКТИРОВАНИЕ ЗАПИСИ ─────────────────────────
+let editingEntry = { key:null, idx:null, per1:null };
+
+function openEditEntry(key, idx) {
+  const it = (state.entries[key]||[])[idx];
+  if (!it) return;
+  const amt = it.amount || 1;
+  editingEntry = { key, idx, per1:{ kcal:(it.kcal||0)/amt, prot:(it.prot||0)/amt, fat:(it.fat||0)/amt, carb:(it.carb||0)/amt } };
+  document.getElementById('editName').value = it.name || '';
+  document.getElementById('editAmount').value = it.amount || '';
+  document.getElementById('editUnit').value = it.unit || 'g';
+  document.getElementById('editMeal').innerHTML = MEALS.map(m => `<option value="${m.key}" ${m.key===it.meal?'selected':''}>${m.icon} ${m.label}</option>`).join('');
+  document.getElementById('editKcal').value = it.kcal || 0;
+  document.getElementById('editProt').value = it.prot || 0;
+  document.getElementById('editFat').value  = it.fat || 0;
+  document.getElementById('editCarb').value = it.carb || 0;
+  document.getElementById('editOverlay').classList.add('show');
+}
+
+function editRecalc() {
+  const a = parseFloat(document.getElementById('editAmount').value) || 0;
+  const p = editingEntry.per1;
+  if (!p || !a) return;
+  document.getElementById('editKcal').value = Math.round(p.kcal*a);
+  document.getElementById('editProt').value = round1(p.prot*a);
+  document.getElementById('editFat').value  = round1(p.fat*a);
+  document.getElementById('editCarb').value = round1(p.carb*a);
+}
+
+function closeEditEntry() { document.getElementById('editOverlay').classList.remove('show'); editingEntry = { key:null, idx:null, per1:null }; }
+
+function saveEditEntry() {
+  const { key, idx } = editingEntry;
+  const it = (state.entries[key]||[])[idx];
+  if (!it) { closeEditEntry(); return; }
+  const name = document.getElementById('editName').value.trim();
+  if (!name) { toast('ERROR: введите название'); return; }
+  it.name = name;
+  it.amount = parseFloat(document.getElementById('editAmount').value) || null;
+  it.unit = document.getElementById('editUnit').value;
+  it.meal = document.getElementById('editMeal').value;
+  it.kcal = Math.round(parseFloat(document.getElementById('editKcal').value) || 0);
+  it.prot = round1(parseFloat(document.getElementById('editProt').value) || 0);
+  it.fat  = round1(parseFloat(document.getElementById('editFat').value)  || 0);
+  it.carb = round1(parseFloat(document.getElementById('editCarb').value) || 0);
+  save();
+  closeEditEntry();
+  renderToday();
+  if (document.getElementById('panel-history').classList.contains('active')) renderHistory();
+  toast('Запись обновлена');
 }
 
 // ───────────────────────── BARCODE SCANNER ─────────────────────────
@@ -1131,8 +1285,28 @@ async function recognizeFood(parts, handler) {
   if (handler) handler(items); else openReview(items);
 }
 
+let aiBusy = false;
+function setBusy(on, msg) {
+  aiBusy = on;
+  const pill = document.getElementById('busyPill');
+  if (msg) document.getElementById('busyText').textContent = msg;
+  pill.classList.toggle('show', on);
+  // блокируем кнопки, чтобы не запустить второй запрос
+  ['voiceBtn','dishVoiceBtn'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = on; });
+}
+
 async function callGemini(parts) {
   if (!state.settings.geminiKey) { toast('Сначала добавьте Gemini API ключ в разделе Цели'); return null; }
+  if (aiBusy) { toast('Подождите — предыдущий запрос ещё выполняется'); return null; }
+  setBusy(true, 'Анализирую…');
+  try {
+    return await callGeminiInner(parts);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function callGeminiInner(parts) {
   const body = JSON.stringify({
     contents: [{ parts }],
     generationConfig: { responseMimeType: 'application/json', temperature: 0.2 }
@@ -1245,6 +1419,8 @@ function openReview(items) {
   reviewItems = items.slice();
   const sel = document.getElementById('reviewMeal');
   sel.innerHTML = MEALS.map(m => `<option value="${m.key}" ${m.key===currentMeal?'selected':''}>${m.icon} ${m.label}</option>`).join('');
+  const note = document.getElementById('reviewDateNote');
+  if (note) note.textContent = '→ ' + humanDate(selectedDate);
   renderReview();
   document.getElementById('reviewOverlay').classList.add('show');
 }
@@ -1266,6 +1442,7 @@ function renderReview() {
           ${['g','ml','pcs'].map(u=>`<option value="${u}" ${u===it.unit?'selected':''}>${UNIT_LABEL[u]}</option>`).join('')}
         </select>
         ${it.assumed ? '<span class="assumed-badge" title="порцию оценил AI — проверьте">≈ оценка</span>' : ''}
+        ${it.meal ? `<span class="meal-tag">${(MEALS.find(m=>m.key===it.meal)||{}).icon||''} ${(MEALS.find(m=>m.key===it.meal)||{}).label||''}</span>` : ''}
         <span class="review-macros" id="rm-${i}">Б ${it.prot} · Ж ${it.fat} · У ${it.carb}</span>
       </div>
     </div>`).join('');
@@ -1293,7 +1470,7 @@ function reviewRemove(i) { reviewItems.splice(i,1); renderReview(); }
 function closeReview() { document.getElementById('reviewOverlay').classList.remove('show'); reviewItems = []; }
 
 function addEntryNoRender(entry) {
-  const key = todayKey();
+  const key = selectedDate;
   if (!state.entries[key]) state.entries[key] = [];
   entry.id = key+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
   state.entries[key].push(entry);
@@ -1301,11 +1478,12 @@ function addEntryNoRender(entry) {
 
 function confirmReview() {
   if (!reviewItems.length) { closeReview(); return; }
-  const meal = document.getElementById('reviewMeal').value || currentMeal;
+  const fallbackMeal = document.getElementById('reviewMeal').value || currentMeal;
   let added = 0, totalKcal = 0;
   reviewItems.forEach(it => {
     if (!it.name || !it.amount) return;
-    addEntryNoRender({ name:it.name, meal, amount:it.amount, unit:it.unit, kcal:it.kcal, prot:it.prot, fat:it.fat, carb:it.carb, source:'ai' });
+    // у позиций из «повторить вчера» свой приём пищи — сохраняем его
+    addEntryNoRender({ name:it.name, meal: it.meal || fallbackMeal, amount:it.amount, unit:it.unit, kcal:it.kcal, prot:it.prot, fat:it.fat, carb:it.carb, source:'ai' });
     upsertProduct(it.name, it.unit, it.per1, it.amount);
     added++; totalKcal += it.kcal;
   });
@@ -1391,35 +1569,51 @@ function addWeight() {
 function removeWeight(idx) { state.weights.splice(idx,1); save(); renderWeight(); renderProgress(); }
 
 // ───────────────────────── HISTORY ─────────────────────────
+const openHistoryDays = new Set(); // какие дни раскрыты — чтобы не схлопывались после правки
+
 function renderHistory() {
-  const keys = Object.keys(state.entries).sort((a,b)=>b.localeCompare(a));
+  const keys = Object.keys(state.entries).filter(k => (state.entries[k]||[]).length).sort((a,b)=>b.localeCompare(a));
   const el = document.getElementById('historyList');
-  if (!keys.length) { el.innerHTML='<div class="empty">&gt; HISTORY_EMPTY</div>'; return; }
+  if (!keys.length) { el.innerHTML='<div class="empty">&gt; история пуста</div>'; return; }
   const mealMap = {}; MEALS.forEach(m=>mealMap[m.key]=m);
   el.innerHTML = keys.map(k => {
     const items = state.entries[k]||[];
-    if (!items.length) return '';
     const total = items.reduce((s,i)=>s+(i.kcal||0),0);
     const goal = state.goals.kcal||2000;
     const overTag = total>goal ? `<span class="over-tag">+${total-goal}</span>` : '';
+    const open = openHistoryDays.has(k);
     return `<div class="history-day">
       <div class="history-day-header" onclick="toggleHistory('${k}')">
-        <span style="color:var(--text-dim)">${k}</span>
+        <span style="color:var(--text-dim)">${k} · ${humanDate(k)}</span>
         <span class="history-kcal">${total} ккал${overTag}</span>
       </div>
-      <div class="history-items" id="hist-${k}" style="display:none">
-        ${items.map(it=>`<div class="history-item-row">
-          <span><span class="meal-tag">${mealMap[it.meal]?mealMap[it.meal].icon:''}</span>${it.name}${it.amount?` <span style="color:var(--text-dim)">(${it.amount}${UNIT_LABEL[it.unit]||''})</span>`:''}</span>
-          <span style="color:var(--cyan)">${it.kcal}</span>
+      <div class="history-items" id="hist-${k}" style="display:${open?'block':'none'}">
+        ${items.map((it,idx)=>`<div class="history-item-row">
+          <span><span class="meal-tag">${mealMap[it.meal]?mealMap[it.meal].icon:''}</span>${escAttr(it.name)}${it.amount?` <span style="color:var(--text-dim)">(${it.amount}${UNIT_LABEL[it.unit]||''})</span>`:''}</span>
+          <span style="display:flex;align-items:center;gap:6px">
+            <span style="color:var(--cyan)">${it.kcal}</span>
+            <button class="food-del" title="изменить" onclick="event.stopPropagation();openEditEntry('${k}',${idx})" style="color:var(--cyan)">✎</button>
+            <button class="food-del" title="удалить" onclick="event.stopPropagation();removeFood('${k}',${idx})">✕</button>
+          </span>
         </div>`).join('')}
+        <button class="btn outline small" style="margin-top:10px" onclick="goToDay('${k}')">открыть этот день</button>
       </div>
     </div>`;
   }).join('');
 }
 
 function toggleHistory(k) {
+  if (openHistoryDays.has(k)) openHistoryDays.delete(k); else openHistoryDays.add(k);
   const el = document.getElementById('hist-'+k);
-  el.style.display = el.style.display==='none' ? 'block' : 'none';
+  if (el) el.style.display = openHistoryDays.has(k) ? 'block' : 'none';
+}
+
+// перейти на вкладку «Сегодня» к конкретному дню (чтобы дописать записи)
+function goToDay(k) {
+  setSelectedDate(k);
+  const btn = document.querySelector('.tab-btn');
+  switchTab('today', btn);
+  window.scrollTo({ top:0, behavior:'smooth' });
 }
 
 // ───────────────────────── GOALS ─────────────────────────
@@ -1510,6 +1704,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = (window.supabase && window.supabase.createClient) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 let currentUser = null;
 let syncTimer = null;
+let dirty = false;             // есть несохранённые локальные изменения
+let lastRemoteStamp = null;    // метка последней известной версии в облаке
 
 function showAuth(show) {
   document.getElementById('authOverlay').classList.toggle('show', show);
@@ -1539,43 +1735,102 @@ async function authSignUp() {
   else document.getElementById('authStatus').textContent = 'Проверьте почту и подтвердите регистрацию, затем войдите.';
 }
 
+function freshState() {
+  return { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, barcodeCache:{}, dishes:[], settings:{geminiKey:'',geminiModel:'gemini-2.5-flash'} };
+}
+
 async function authSignOut() {
   if (sb) await sb.auth.signOut();
   // очищаем локально — чтобы на общем устройстве следующий не увидел чужого
-  try { localStorage.removeItem('kaloriya_v3'); } catch(e){}
-  state = { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, barcodeCache:{}, dishes:[], settings:{geminiKey:'',geminiModel:'gemini-2.5-flash'} };
+  try { localStorage.removeItem('kaloriya_v3'); localStorage.removeItem('kaloriya_uid'); } catch(e){}
+  state = freshState();
   ensureDefaults();
+  selectedDate = todayKey();
   renderAll();
 }
 
-// загрузить данные пользователя из облака (источник правды при входе)
+// Объединение локальных и облачных данных — чтобы правки с офлайн-устройства не затирались
+function mergeStates(local, remote) {
+  const out = JSON.parse(JSON.stringify(remote));
+  const sig = (it) => it.id || `${it.name}|${it.meal}|${it.kcal}|${it.amount}`;
+  // записи: объединяем по дням, дубли отсекаем по id
+  out.entries = out.entries || {};
+  Object.keys(local.entries || {}).forEach(day => {
+    const seen = new Set((out.entries[day] || []).map(sig));
+    (local.entries[day] || []).forEach(it => { if (!seen.has(sig(it))) { (out.entries[day] = out.entries[day] || []).push(it); seen.add(sig(it)); } });
+  });
+  // вес: по дате, локальные добавляем только если такой даты ещё нет
+  const wDates = new Set((out.weights || []).map(w => w.date));
+  (local.weights || []).forEach(w => { if (!wDates.has(w.date)) out.weights.push(w); });
+  out.weights.sort((a,b) => a.date.localeCompare(b.date));
+  // блюда: по id
+  const dIds = new Set((out.dishes || []).map(d => d.id));
+  (local.dishes || []).forEach(d => { if (!dIds.has(d.id)) out.dishes.push(d); });
+  // продукты: берём вариант с большим счётчиком использований
+  out.products = out.products || {};
+  Object.keys(local.products || {}).forEach(k => {
+    const l = local.products[k], r = out.products[k];
+    if (!r || (l.usageCount||0) > (r.usageCount||0)) out.products[k] = l;
+  });
+  out.barcodeCache = Object.assign({}, local.barcodeCache || {}, out.barcodeCache || {});
+  // ключ Gemini: если в облаке пусто — не теряем локальный
+  out.settings = out.settings || {};
+  if (!out.settings.geminiKey && local.settings && local.settings.geminiKey) out.settings.geminiKey = local.settings.geminiKey;
+  return out;
+}
+
+// вход: объединяем локальное с облачным, результат пишем обратно
 async function loadCloud() {
   if (!sb || !currentUser) return;
   setSyncStatus('Загружаю данные…');
-  const { data, error } = await sb.from('user_data').select('data').eq('user_id', currentUser.id).maybeSingle();
+  // если в браузере остался кэш ДРУГОГО пользователя — не подмешиваем его
+  try {
+    const cachedUid = localStorage.getItem('kaloriya_uid');
+    if (cachedUid && cachedUid !== currentUser.id) { state = freshState(); }
+    localStorage.setItem('kaloriya_uid', currentUser.id);
+  } catch(e){}
+
+  const { data, error } = await sb.from('user_data').select('data,updated_at').eq('user_id', currentUser.id).maybeSingle();
   if (error) { setSyncStatus('Ошибка загрузки: ' + error.message); return; }
-  if (data && data.data && Object.keys(data.data).length) {
-    state = data.data; ensureDefaults();
-    try { localStorage.setItem('kaloriya_v3', JSON.stringify(state)); } catch(e){}
-    setSyncStatus('✓ синхронизировано');
-  } else {
-    // первая загрузка аккаунта — поднимаем то, что есть локально, в облако
-    ensureDefaults();
-    await syncCloudNow();
-    setSyncStatus('✓ синхронизировано');
-  }
+  const remote = (data && data.data && Object.keys(data.data).length) ? data.data : null;
+  if (remote) state = mergeStates(state, remote);
+  ensureDefaults();
+  try { localStorage.setItem('kaloriya_v3', JSON.stringify(state)); } catch(e){}
+  await syncCloudNow();
+  selectedDate = todayKey();
   renderAll();
 }
 
 function syncCloud() {
   clearTimeout(syncTimer);
+  dirty = true;
   setSyncStatus('сохраняю…');
   syncTimer = setTimeout(syncCloudNow, 800);
 }
+
 async function syncCloudNow() {
   if (!sb || !currentUser) return;
-  const { error } = await sb.from('user_data').upsert({ user_id: currentUser.id, data: state, updated_at: new Date().toISOString() });
+  const stamp = new Date().toISOString();
+  const { error } = await sb.from('user_data').upsert({ user_id: currentUser.id, data: state, updated_at: stamp });
+  if (!error) { dirty = false; lastRemoteStamp = stamp; }
   setSyncStatus(error ? ('ошибка синхронизации: ' + error.message) : '✓ синхронизировано');
+}
+
+// подтянуть изменения, сделанные на другом устройстве
+async function pullCloud() {
+  if (!sb || !currentUser || dirty || aiBusy) return;
+  const { data, error } = await sb.from('user_data').select('data,updated_at').eq('user_id', currentUser.id).maybeSingle();
+  if (error || !data) return;
+  if (lastRemoteStamp && data.updated_at <= lastRemoteStamp) return; // нового нет
+  lastRemoteStamp = data.updated_at;
+  if (data.data && Object.keys(data.data).length) {
+    state = data.data; ensureDefaults();
+    try { localStorage.setItem('kaloriya_v3', JSON.stringify(state)); } catch(e){}
+    renderAll();
+    if (document.getElementById('panel-history').classList.contains('active')) renderHistory();
+    if (document.getElementById('panel-weight').classList.contains('active')) renderWeight();
+    setSyncStatus('✓ обновлено с другого устройства');
+  }
 }
 
 // ───────────────────────── INIT ─────────────────────────
@@ -1610,6 +1865,25 @@ if (sb) {
 } else {
   // нет сети/CDN — работаем локально, без облака
   toast('Облако недоступно — работаю локально');
+}
+
+// подтягиваем изменения с других устройств: при возврате на вкладку и раз в минуту
+let lastKnownToday = todayKey();
+function onAppFocus() {
+  if (document.hidden) return;
+  // если приложение висело открытым и наступил новый день — переключаемся на него
+  const t = todayKey();
+  if (t !== lastKnownToday) { if (selectedDate === lastKnownToday) selectedDate = t; lastKnownToday = t; renderToday(); }
+  pullCloud();
+}
+document.addEventListener('visibilitychange', onAppFocus);
+window.addEventListener('focus', onAppFocus);
+setInterval(() => { if (!document.hidden) onAppFocus(); }, 60000);
+window.addEventListener('beforeunload', () => { if (dirty) syncCloudNow(); });
+
+// PWA: можно добавить на главный экран телефона и открывать без браузера / офлайн
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
 }
 </script>
 </body>
