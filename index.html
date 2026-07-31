@@ -219,6 +219,30 @@
   .dish-total:empty { display:none; }
   .dish-total b { font-family:'Orbitron',monospace; color:var(--cyan); font-size:1.05rem; text-shadow:0 0 8px rgba(0,255,224,.4); }
 
+  /* ─── ТЕЛЕФОН: увеличиваем зоны нажатия (палец ≠ курсор) ─── */
+  @media (max-width:600px) {
+    button, .quick-chip, .meal-btn, .tab-btn { touch-action:manipulation; -webkit-tap-highlight-color:rgba(0,255,224,.15); }
+    .tab-btn { padding:14px 16px; }
+    .icon-btn { width:46px; height:46px; min-width:46px; font-size:1.15rem; }
+    .date-nav-btn { width:42px; height:42px; min-width:42px; }
+    .date-nav-input { padding:11px 10px; }
+    .btn { padding:13px 20px; }
+    .btn.small { padding:10px 14px; }
+    .section-label .sl-action { padding:10px 14px; }
+    .section-label { flex-wrap:wrap; gap:8px; }
+    .quick-chip { padding:11px 13px; font-size:.64rem; }
+    /* ✎ и ✕ — крупнее и разнесены, чтобы не промахнуться */
+    .food-del { min-width:40px; height:40px; display:inline-flex; align-items:center; justify-content:center; padding:0; font-size:1.05rem; }
+    .food-item { gap:4px; padding:10px 8px 10px 14px; }
+    .food-item .food-del + .food-del { margin-left:2px; }
+    .review-del { min-width:40px; height:40px; display:inline-flex; align-items:center; justify-content:center; padding:0; }
+    .history-item-row { padding:8px 0; }
+    .overlay { padding:12px; }
+    .overlay-box { max-height:92vh; padding:16px; }
+    .pass-toggle { width:48px; }
+    .toast { bottom:16px; left:12px; right:12px; padding:12px 16px; }
+  }
+
   @keyframes fadeDown { from{opacity:0;transform:translateY(-12px)} to{opacity:1;transform:translateY(0)} }
   @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
   @keyframes slideIn { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
