@@ -176,6 +176,11 @@
 
   .empty { text-align:center; padding:30px 20px; color:var(--text-dim); font-size:.68rem; letter-spacing:.08em; border:1px dashed var(--border); margin-top:10px; }
 
+  .pass-wrap { position:relative; display:block; }
+  .pass-wrap .inp { width:100%; padding-right:46px; }
+  .pass-toggle { position:absolute; right:1px; top:1px; bottom:1px; width:42px; border:none; border-left:1px solid var(--border); background:var(--bg3); color:var(--text-dim); cursor:pointer; font-size:.9rem; line-height:1; transition:all .15s; }
+  .pass-toggle:hover { color:var(--cyan); background:var(--cyan-dim); }
+  .pass-toggle.on { color:var(--cyan); text-shadow:0 0 8px rgba(0,255,224,.5); }
   .busy-pill { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%) scale(.96); z-index:600; display:none; align-items:center; gap:10px; padding:14px 22px; border:1px solid var(--cyan); background:var(--panel); box-shadow:0 0 30px rgba(0,255,224,.25); font-size:.76rem; color:var(--cyan); letter-spacing:.06em; text-shadow:0 0 8px rgba(0,255,224,.4); transition:transform .2s, opacity .2s; opacity:0; }
   .busy-pill.show { display:flex; opacity:1; transform:translate(-50%,-50%) scale(1); }
   .busy-spinner { width:16px; height:16px; min-width:16px; border:2px solid rgba(0,255,224,.25); border-top-color:var(--cyan); border-radius:50%; animation:spin .7s linear infinite; }
@@ -381,7 +386,12 @@
 
     <div class="section-label" style="margin-top:32px"><span class="sl-text">AI распознавание (Gemini)</span></div>
     <div class="goals-form">
-      <div class="goal-field"><label>Gemini API ключ</label><input class="inp" id="geminiKey" type="password" placeholder="AIza..." style="width:100%"></div>
+      <div class="goal-field"><label>Gemini API ключ</label>
+        <div class="pass-wrap">
+          <input class="inp" id="geminiKey" type="password" placeholder="AIza...">
+          <button type="button" class="pass-toggle" onclick="togglePass('geminiKey',this)" title="показать ключ">👁</button>
+        </div>
+      </div>
       <div class="goal-field"><label>Модель Gemini</label><input class="inp" id="geminiModel" type="text" placeholder="gemini-2.5-flash" style="width:100%"></div>
     </div>
     <div class="hint">Ключ хранится только в localStorage этого браузера и используется для распознавания еды по фото/голосу. Запрос идёт напрямую в Google; если браузер заблокирует его (CORS), автоматически повторяется через прокси corsproxy.io. Модель по умолчанию — <b>gemini-2.5-flash</b>. Если увидишь ошибку «HTTP 404 ... model not found» — впиши сюда другое имя модели (например <b>gemini-2.0-flash</b> или <b>gemini-flash-latest</b>) и сохрани.</div>
@@ -484,7 +494,10 @@
   <div class="overlay-box" style="max-width:380px">
     <div class="overlay-title"><span>// ДОСТУП К KALORIYA</span></div>
     <input class="inp" id="authEmail" type="email" autocomplete="email" placeholder="почта" style="width:100%;margin-bottom:8px">
-    <input class="inp" id="authPass" type="password" autocomplete="current-password" placeholder="пароль (мин. 6 символов)" style="width:100%;margin-bottom:12px" onkeydown="if(event.key==='Enter')authSignIn()">
+    <div class="pass-wrap" style="margin-bottom:12px">
+      <input class="inp" id="authPass" type="password" autocomplete="current-password" placeholder="пароль (мин. 6 символов)" onkeydown="if(event.key==='Enter')authSignIn()">
+      <button type="button" class="pass-toggle" onclick="togglePass('authPass',this)" title="показать пароль">👁</button>
+    </div>
     <div style="display:flex;gap:8px">
       <button class="btn" id="authSignInBtn" onclick="authSignIn()" style="flex:1">ВОЙТИ</button>
       <button class="btn outline" id="authSignUpBtn" onclick="authSignUp()" style="flex:1">РЕГИСТРАЦИЯ</button>
@@ -1706,6 +1719,17 @@ let currentUser = null;
 let syncTimer = null;
 let dirty = false;             // есть несохранённые локальные изменения
 let lastRemoteStamp = null;    // метка последней известной версии в облаке
+
+// показать/скрыть содержимое поля с паролем или ключом
+function togglePass(inputId, btn) {
+  const inp = document.getElementById(inputId);
+  if (!inp) return;
+  const show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  btn.classList.toggle('on', show);
+  btn.textContent = show ? '🙈' : '👁';
+  btn.title = show ? 'скрыть' : 'показать';
+}
 
 function showAuth(show) {
   document.getElementById('authOverlay').classList.toggle('show', show);
