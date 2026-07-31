@@ -168,7 +168,7 @@
   .goal-field label { display:block; font-size:.7rem; letter-spacing:.2em; text-transform:uppercase; color:var(--text-dim); margin-bottom:6px; }
   .goal-field.full { grid-column:1/-1; }
   .hint { font-size:.68rem; color:var(--text-dim); margin-top:6px; line-height:1.5; }
-  .hint a { color:var(--cyan); }
+  .hint a, .hint .link-like { color:var(--cyan); cursor:pointer; text-decoration:underline dotted; }
 
   .history-day { margin-top:6px; border:1px solid var(--border); background:var(--bg2); animation:fadeUp .25s ease both; }
   .history-day-header { display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:var(--bg3); border-bottom:1px solid var(--border); cursor:pointer; font-size:.73rem; transition:background .15s; }
@@ -440,9 +440,9 @@
           <button type="button" class="pass-toggle" onclick="togglePass('geminiKey',this)" title="показать ключ">👁</button>
         </div>
       </div>
-      <div class="goal-field"><label>Модель Gemini</label><input class="inp" id="geminiModel" type="text" placeholder="gemini-2.5-flash" style="width:100%"></div>
+      <div class="goal-field" id="modelField" style="display:none"><label>Модель</label><input class="inp" id="geminiModel" type="text" placeholder="gemini-2.5-flash" style="width:100%"></div>
     </div>
-    <div class="hint">Ключ хранится только в localStorage этого браузера и используется для распознавания еды по фото/голосу. Запрос идёт напрямую в Google; если браузер заблокирует его (CORS), автоматически повторяется через прокси corsproxy.io. Модель по умолчанию — <b>gemini-2.5-flash</b>. Если увидишь ошибку «HTTP 404 ... model not found» — впиши сюда другое имя модели (например <b>gemini-2.0-flash</b> или <b>gemini-flash-latest</b>) и сохрани.</div>
+    <div class="hint">Нужен, чтобы распознавать еду по фото и голосу. Хранится только у вас. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Где взять ключ</a> · <span class="link-like" onclick="toggleModelField()">сменить модель</span></div>
     <button class="btn outline small" onclick="saveGeminiSettings()" style="margin-top:10px">Сохранить ключ</button>
 
     <div class="section-label" style="margin-top:32px"><span class="sl-text">аккаунт</span></div>
@@ -1448,7 +1448,7 @@ function setBusy(on, msg) {
 }
 
 async function callGemini(parts) {
-  if (!state.settings.geminiKey) { toast('Сначала добавьте Gemini API ключ в разделе Цели'); return null; }
+  if (!state.settings.geminiKey) { toast('Сначала добавьте Gemini-ключ в Настройках'); return null; }
   if (aiBusy) { toast('Подождите — предыдущий запрос ещё выполняется'); return null; }
   setBusy(true, 'Анализирую…');
   try {
@@ -1458,6 +1458,21 @@ async function callGemini(parts) {
   }
 }
 
+// Человеческое объяснение вместо кода ошибки — и подсказка появляется тогда, когда нужна
+function reportGeminiError(status, detail) {
+  const d = (detail || '').toLowerCase();
+  if (status === 404 || d.includes('not found')) {
+    toast('Модель недоступна — откройте Настройки и укажите другую (поле «сменить модель»)');
+    toggleModelField(true);
+    return;
+  }
+  if (status === 400 && (d.includes('api key') || d.includes('api_key'))) { toast('Ключ Gemini недействителен — проверьте его в Настройках'); return; }
+  if (status === 403) { toast('Доступ к Gemini запрещён — проверьте ключ и его ограничения'); return; }
+  if (status === 429) { toast('Слишком много запросов к Gemini — подождите минуту'); return; }
+  if (status >= 500) { toast('Google сейчас недоступен — попробуйте позже'); return; }
+  toast('Не получилось связаться с Gemini: ' + (detail || 'проверьте интернет'));
+}
+
 async function callGeminiInner(parts) {
   const body = JSON.stringify({
     contents: [{ parts }],
@@ -1465,7 +1480,7 @@ async function callGeminiInner(parts) {
   });
   const direct = geminiEndpoint();
   const proxied = 'https://corsproxy.io/?url=' + encodeURIComponent(direct);
-  let data = null, lastErr = '';
+  let data = null, lastErr = '', status = 0;
   // 1) пробуем напрямую (Gemini поддерживает CORS из браузера), 2) если сеть/CORS — через прокси
   for (const url of [direct, proxied]) {
     try {
@@ -1473,7 +1488,8 @@ async function callGeminiInner(parts) {
       const raw = await res.text();
       let json = null; try { json = JSON.parse(raw); } catch(e) {}
       if (!res.ok) {
-        lastErr = `HTTP ${res.status}: ` + ((json && json.error && json.error.message) || raw.slice(0,160) || res.statusText);
+        status = res.status;
+        lastErr = (json && json.error && json.error.message) || raw.slice(0,160) || res.statusText;
         if (res.status >= 400 && res.status < 500) break; // битый ключ/модель/квота — прокси не спасёт
         continue;
       }
@@ -1482,12 +1498,12 @@ async function callGeminiInner(parts) {
       lastErr = e.message || 'сетевая ошибка'; continue; // вероятно CORS — пробуем прокси
     }
   }
-  if (!data) { toast('Gemini: ' + (lastErr || 'нет ответа')); return null; }
+  if (!data) { reportGeminiError(status, lastErr); return null; }
   const cand = data.candidates && data.candidates[0];
   const text = cand && cand.content && cand.content.parts && cand.content.parts[0] && cand.content.parts[0].text || '';
   if (!text) {
     const reason = (cand && cand.finishReason) || (data.promptFeedback && data.promptFeedback.blockReason);
-    toast('Gemini вернул пустой ответ' + (reason ? ' (' + reason + ')' : '') + ' — проверьте модель в Цели');
+    toast('Пустой ответ AI' + (reason ? ' (' + reason + ')' : '') + ' — попробуйте ещё раз');
     return null;
   }
   const parsed = parseAIJson(text);
@@ -1496,7 +1512,7 @@ async function callGeminiInner(parts) {
 }
 
 function openPhotoCapture() {
-  if (!state.settings.geminiKey) { toast('Добавьте Gemini API ключ в разделе Цели'); return; }
+  if (!state.settings.geminiKey) { toast('Добавьте Gemini-ключ в Настройках'); return; }
   document.getElementById('photoInput').click();
 }
 
@@ -1529,7 +1545,7 @@ function listenVoice(btnId, onFinalText) {
   if (voiceRecognition) { try { voiceRecognition.stop(); } catch(e){} return; }
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { toast('Голосовой ввод не поддерживается в этом браузере'); return; }
-  if (!state.settings.geminiKey) { toast('Добавьте Gemini API ключ в разделе Цели для авто-КБЖУ'); return; }
+  if (!state.settings.geminiKey) { toast('Добавьте Gemini-ключ в Настройках — без него КБЖУ не посчитается'); return; }
   const btn = document.getElementById(btnId);
   const recognition = new SR();
   voiceRecognition = recognition;
@@ -1951,6 +1967,15 @@ function saveGoals() {
   state.goals.activity = parseFloat(document.getElementById('goalActivity').value) || 1.55;
   save(); renderToday(); renderProgress();
   toast('GOALS_SAVED OK');
+}
+
+// поле модели скрыто: нужно редко — если Google переименует модель
+function toggleModelField(force) {
+  const f = document.getElementById('modelField');
+  if (!f) return;
+  const show = (force === true) || (f.style.display === 'none');
+  f.style.display = show ? 'block' : 'none';
+  if (show) document.getElementById('geminiModel').focus();
 }
 
 function saveGeminiSettings() {
