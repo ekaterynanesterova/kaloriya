@@ -242,7 +242,21 @@
     .btn.small { padding:10px 14px; }
     .section-label .sl-action { padding:10px 14px; }
     .section-label { flex-wrap:wrap; gap:8px; }
-    .quick-chip { padding:11px 13px; font-size:.7rem; }
+    .quick-chip { padding:11px 13px; font-size:.7rem; flex:0 0 auto; }
+    /* чуть плотнее, чтобы поле ввода и кнопки 🎤📷 помещались на первый экран */
+    .date-nav { margin-top:14px; }
+    .stat-card { padding:14px; }
+    .meal-bar { margin-top:12px; gap:6px; }
+    .meal-btn { padding:7px 4px; }
+    .meal-btn .mi { font-size:.95rem; }
+    .meal-btn .mk { font-size:.8rem; margin-top:2px; }
+    .meal-btn .ml { margin-top:3px; }
+    .main-charts { margin-top:10px; gap:6px; }
+    .today-footer { margin-top:9px; padding-top:8px; }
+    /* чипы одной строкой со свайпом вбок: раньше 10 штук переносились на 5 строк (~480px) */
+    .quick-foods { flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; -ms-overflow-style:none; padding-bottom:2px; }
+    .quick-foods::-webkit-scrollbar { display:none; width:0; height:0; }
+    .quick-foods .empty { flex:0 0 auto; }
     /* ✎ и ✕ — крупнее и разнесены, чтобы не промахнуться */
     .food-del { min-width:40px; height:40px; display:inline-flex; align-items:center; justify-content:center; padding:0; font-size:1.05rem; }
     .food-item { gap:4px; padding:10px 8px 10px 14px; }
@@ -325,20 +339,7 @@
     <!-- MEAL BAR -->
     <div class="meal-bar" id="mealBar"></div>
 
-    <div class="section-label">
-      <span class="sl-text">мои блюда</span>
-      <button class="sl-action" onclick="openDishForm()">+ блюдо</button>
-    </div>
-    <div class="quick-foods" id="dishList"></div>
-
-    <div class="section-label">
-      <span class="sl-text">быстрое добавление</span>
-      <button class="sl-action" onclick="refreshQuickAdd()">↻ обновить</button>
-    </div>
-    <div class="quick-foods" id="quickFoods"></div>
-
-    <div class="section-label"><span class="sl-text">добавить приём пищи</span></div>
-    <div class="input-row">
+    <div class="input-row" style="margin-top:16px">
       <input class="inp" id="foodName" list="productNames" placeholder="название продукта или штрихкод" oninput="onNameInput()" style="min-width:160px">
       <datalist id="productNames"></datalist>
       <button class="icon-btn" title="Сканировать штрихкод" onclick="openScanner()">▤</button>
@@ -370,6 +371,18 @@
     <div class="input-row" style="margin-top:12px">
       <button class="btn" onclick="addFood()" style="flex:0">+ ДОБАВИТЬ</button>
     </div>
+
+    <div class="section-label">
+      <span class="sl-text">мои блюда</span>
+      <button class="sl-action" onclick="openDishForm()">+ блюдо</button>
+    </div>
+    <div class="quick-foods" id="dishList"></div>
+
+    <div class="section-label">
+      <span class="sl-text">быстрое добавление</span>
+      <button class="sl-action" onclick="refreshQuickAdd()">↻ обновить</button>
+    </div>
+    <div class="quick-foods" id="quickFoods"></div>
 
     <div class="food-list" id="foodList"></div>
   </div>
