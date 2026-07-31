@@ -181,6 +181,9 @@
   .pass-toggle { position:absolute; right:1px; top:1px; bottom:1px; width:42px; border:none; border-left:1px solid var(--border); background:var(--bg3); color:var(--text-dim); cursor:pointer; font-size:.9rem; line-height:1; transition:all .15s; }
   .pass-toggle:hover { color:var(--cyan); background:var(--cyan-dim); }
   .pass-toggle.on { color:var(--cyan); text-shadow:0 0 8px rgba(0,255,224,.5); }
+  .update-banner { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); z-index:700; display:flex; align-items:center; gap:12px; padding:10px 14px; border:1px solid var(--cyan); background:var(--panel); box-shadow:0 0 24px rgba(0,255,224,.2); font-size:.7rem; color:var(--text); letter-spacing:.04em; max-width:calc(100% - 24px); animation:fadeUp .25s ease both; }
+  .update-banner .ub-close { cursor:pointer; color:var(--text-dim); font-size:.85rem; padding:0 2px; }
+  .update-banner .ub-close:hover { color:var(--magenta); }
   .busy-pill { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%) scale(.96); z-index:600; display:none; align-items:center; gap:10px; padding:14px 22px; border:1px solid var(--cyan); background:var(--panel); box-shadow:0 0 30px rgba(0,255,224,.25); font-size:.76rem; color:var(--cyan); letter-spacing:.06em; text-shadow:0 0 8px rgba(0,255,224,.4); transition:transform .2s, opacity .2s; opacity:0; }
   .busy-pill.show { display:flex; opacity:1; transform:translate(-50%,-50%) scale(1); }
   .busy-spinner { width:16px; height:16px; min-width:16px; border:2px solid rgba(0,255,224,.25); border-top-color:var(--cyan); border-radius:50%; animation:spin .7s linear infinite; }
@@ -1975,15 +1978,50 @@ window.addEventListener('focus', onAppFocus);
 setInterval(() => { if (!document.hidden) onAppFocus(); }, 60000);
 window.addEventListener('beforeunload', () => { if (dirty) syncCloudNow(); });
 
-// PWA: иконка на главном экране, работа офлайн + автообновление версии
+// PWA: иконка на главном экране, работа офлайн + аккуратное обновление версии
 let swReg = null;
 let reloadingForUpdate = false;
+let updateReady = false;
+
+// Занята ли пользовательница прямо сейчас? Тогда перезагружать НЕЛЬЗЯ.
+function isBusyNow() {
+  const overlays = ['reviewOverlay','dishOverlay','editOverlay','scannerOverlay','authOverlay'];
+  if (overlays.some(id => { const el = document.getElementById(id); return el && el.classList.contains('show'); })) return true;
+  if (aiBusy || voiceRecognition) return true;
+  const typed = ['foodName','foodAmount','dishName','dishIngText','manualBarcodeInput','weightInput']
+    .some(id => { const el = document.getElementById(id); return el && el.value && String(el.value).trim(); });
+  return typed;
+}
+
+async function applyUpdate() {
+  if (reloadingForUpdate) return;
+  reloadingForUpdate = true;
+  if (dirty) { try { await syncCloudNow(); } catch(e) {} } // ничего не теряем
+  location.reload();
+}
+
+function maybeApplyUpdate() {
+  if (!updateReady || reloadingForUpdate) return;
+  if (isBusyNow()) return;                          // занята (или свернула с открытой формой) — ждём, не мешаем
+  if (document.hidden) { applyUpdate(); return; }   // свёрнуто и ничего не начато — обновляем незаметно
+  showUpdateBanner();                               // предлагаем обновиться, когда удобно
+}
+
+function showUpdateBanner() {
+  if (document.getElementById('updateBanner')) return;
+  const b = document.createElement('div');
+  b.id = 'updateBanner';
+  b.className = 'update-banner';
+  b.innerHTML = '<span>Доступна новая версия</span><button class="btn small" onclick="applyUpdate()">обновить</button><span class="ub-close" onclick="this.parentElement.remove()">✕</span>';
+  document.body.appendChild(b);
+}
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  const hadController = !!navigator.serviceWorker.controller; // false = самая первая установка
+
   window.addEventListener('load', async () => {
     try {
       swReg = await navigator.serviceWorker.register('sw.js');
-      // появилась новая версия — применяем сразу
       swReg.addEventListener('updatefound', () => {
         const nw = swReg.installing;
         if (!nw) return;
@@ -1991,18 +2029,21 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
           if (nw.state === 'installed' && navigator.serviceWorker.controller) nw.postMessage('skip-waiting');
         });
       });
-      // проверяем обновления при каждом возврате в приложение
       document.addEventListener('visibilitychange', () => { if (!document.hidden && swReg) swReg.update().catch(()=>{}); });
       window.addEventListener('focus', () => { if (swReg) swReg.update().catch(()=>{}); });
     } catch(e) {}
   });
 
-  // новая версия вступила в силу — перезагружаем страницу один раз
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (reloadingForUpdate) return;
-    reloadingForUpdate = true;
-    location.reload();
+    if (!hadController) return;   // первая установка — перезагружать не нужно
+    updateReady = true;
+    maybeApplyUpdate();
   });
+
+  // свернули приложение — момент применить обновление незаметно
+  document.addEventListener('visibilitychange', () => { if (document.hidden) maybeApplyUpdate(); });
+  // освободилась — покажем предложение
+  setInterval(maybeApplyUpdate, 15000);
 }
 
 // Кнопка «Обновить приложение» в настройках: чистит кэш и перезагружает
