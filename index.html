@@ -345,8 +345,8 @@
       </div>
     </div>
     <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <button class="btn" onclick="saveGoals()">SAVE GOALS</button>
-      <button class="btn outline" onclick="calcTDEE()">CALC TDEE</button>
+      <button class="btn" onclick="saveGoals()">СОХРАНИТЬ ЦЕЛИ</button>
+      <button class="btn outline" onclick="calcTDEE()">РАССЧИТАТЬ НОРМУ</button>
       <div id="tdeeResult" style="font-size:.72rem;color:var(--cyan);text-shadow:0 0 8px rgba(0,255,224,.4)"></div>
     </div>
 
@@ -369,7 +369,7 @@
     <button class="btn outline small" onclick="authSignOut()" style="margin-top:10px">ВЫЙТИ ИЗ АККАУНТА</button>
 
     <div class="section-label" style="margin-top:32px"><span class="sl-text">системные операции</span></div>
-    <button class="btn danger small" onclick="resetAll()" style="margin-top:8px">RESET ALL DATA</button>
+    <button class="btn danger small" onclick="resetAll()" style="margin-top:8px">СБРОСИТЬ ВСЕ ДАННЫЕ</button>
   </div>
 
 </div>
@@ -1462,7 +1462,7 @@ function calcTDEE() {
   if (!h||!age||!gender||!kg) { toast('ERROR: заполните все параметры'); return; }
   const bmr = gender==='f' ? 10*kg+6.25*h-5*age-161 : 10*kg+6.25*h-5*age+5;
   const tdee = Math.round(bmr*activity);
-  document.getElementById('tdeeResult').textContent = `> TDEE = ${tdee} kcal/day`;
+  document.getElementById('tdeeResult').textContent = `> Норма ≈ ${tdee} ккал/день`;
   document.getElementById('goalKcal').value = tdee;
   toast(`TDEE рассчитан: ${tdee} ккал`);
 }
@@ -1485,7 +1485,7 @@ function renderProgress() {
 }
 
 function resetAll() {
-  if (!confirm('RESET ALL DATA? This cannot be undone.')) return;
+  if (!confirm('Сбросить ВСЕ данные? Это действие необратимо.')) return;
   state = { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, barcodeCache:{}, dishes:[], settings:{geminiKey:'',geminiModel:'gemini-2.5-flash'} };
   ensureDefaults(); save(); renderAll();
   toast('ALL_DATA_CLEARED');
