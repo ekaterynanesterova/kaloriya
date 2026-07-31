@@ -444,7 +444,7 @@
     <video id="scannerVideo" autoplay playsinline muted></video>
     <div class="scan-status" id="scanStatus">Наведите камеру на штрихкод...</div>
     <div class="manual-barcode-row" id="manualBarcodeRow">
-      <input class="inp" id="manualBarcodeInput" placeholder="введите номер штрихкода">
+      <input class="inp" id="manualBarcodeInput" inputmode="numeric" pattern="[0-9]*" placeholder="или впишите номер под штрихкодом" onkeydown="if(event.key==='Enter')lookupBarcode(this.value)">
       <button class="btn small" onclick="lookupBarcode(document.getElementById('manualBarcodeInput').value)">найти</button>
     </div>
   </div>
@@ -1194,28 +1194,66 @@ function saveEditEntry() {
 }
 
 // ───────────────────────── BARCODE SCANNER ─────────────────────────
+const ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/zxing-browser.min.js';
+let zxingControls = null;
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    if (document.querySelector('script[data-src="'+src+'"]')) return res();
+    const s = document.createElement('script');
+    s.src = src; s.dataset.src = src;
+    s.onload = () => res();
+    s.onerror = () => rej(new Error('нет соединения'));
+    document.head.appendChild(s);
+  });
+}
+
 async function openScanner() {
+  const status = document.getElementById('scanStatus');
   document.getElementById('scannerOverlay').classList.add('show');
-  document.getElementById('manualBarcodeRow').style.display = 'none';
-  document.getElementById('scanStatus').textContent = 'Запрашиваю доступ к камере...';
+  document.getElementById('manualBarcodeRow').style.display = 'flex'; // ручной ввод доступен всегда
+  status.textContent = 'Запрашиваю доступ к камере…';
   scannerActive = true;
+  const video = document.getElementById('scannerVideo');
+
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' } } });
     scannerStream = stream;
-    const video = document.getElementById('scannerVideo');
     video.srcObject = stream;
+    video.setAttribute('playsinline', '');
     await video.play();
-    if ('BarcodeDetector' in window) {
-      document.getElementById('scanStatus').textContent = 'Наведите камеру на штрихкод...';
-      const detector = new BarcodeDetector({ formats:['ean_13','ean_8','upc_a','upc_e','code_128'] });
-      scanLoop(video, detector);
-    } else {
-      document.getElementById('scanStatus').textContent = 'Автосканирование не поддерживается этим браузером.';
-      document.getElementById('manualBarcodeRow').style.display = 'flex';
-    }
   } catch(e) {
-    document.getElementById('scanStatus').textContent = 'Нет доступа к камере: ' + e.message;
-    document.getElementById('manualBarcodeRow').style.display = 'flex';
+    status.textContent = 'Нет доступа к камере: ' + e.message + '. Введите номер вручную ↓';
+    return;
+  }
+
+  // 1) встроенный детектор браузера (Chrome на Android)
+  if ('BarcodeDetector' in window) {
+    try {
+      const supported = await window.BarcodeDetector.getSupportedFormats();
+      const formats = ['ean_13','ean_8','upc_a','upc_e','code_128'].filter(f => supported.includes(f));
+      if (formats.length) {
+        status.textContent = 'Наведите камеру на штрихкод…';
+        scanLoop(video, new window.BarcodeDetector({ formats }));
+        return;
+      }
+    } catch(e) { /* не получилось — идём в запасной вариант */ }
+  }
+
+  // 2) запасной сканер: работает везде, включая iPhone/Safari
+  status.textContent = 'Загружаю сканер…';
+  try {
+    await loadScript(ZXING_URL);
+    const NS = window.ZXingBrowser;
+    if (!NS || !NS.BrowserMultiFormatReader) throw new Error('сканер не загрузился');
+    if (!scannerActive) return; // успели закрыть
+    const reader = new NS.BrowserMultiFormatReader();
+    status.textContent = 'Наведите камеру на штрихкод…';
+    zxingControls = await reader.decodeFromVideoElement(video, (result) => {
+      if (result && scannerActive) onBarcodeDetected(result.getText());
+    });
+  } catch(e) {
+    status.textContent = 'Сканер недоступен (' + e.message + '). Введите номер вручную ↓';
   }
 }
 
@@ -1229,7 +1267,10 @@ function scanLoop(video, detector) {
 
 function closeScanner() {
   scannerActive = false;
+  if (zxingControls) { try { zxingControls.stop(); } catch(e){} zxingControls = null; }
   if (scannerStream) { scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
+  const v = document.getElementById('scannerVideo');
+  if (v) v.srcObject = null;
   document.getElementById('scannerOverlay').classList.remove('show');
 }
 
