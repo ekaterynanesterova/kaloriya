@@ -212,6 +212,14 @@
   .manual-barcode-row { display:none; gap:8px; margin-top:12px; }
   .scan-actions { display:flex; gap:8px; margin-top:10px; }
   .scan-actions .btn { flex:1; }
+  /* окно голосового ввода */
+  .voice-live { display:flex; align-items:center; gap:10px; font-size:.7rem; letter-spacing:.14em; text-transform:uppercase; color:var(--magenta); margin-bottom:10px; }
+  .voice-dot { width:11px; height:11px; min-width:11px; border-radius:50%; background:var(--magenta); box-shadow:0 0 10px var(--magenta); animation:pulse 1s infinite; }
+  .voice-timer { margin-left:auto; font-family:'Orbitron',monospace; color:var(--text); letter-spacing:.05em; }
+  .voice-transcript { min-height:96px; max-height:34vh; overflow-y:auto; border:1px solid var(--border); background:var(--bg2); padding:12px; font-size:.86rem; line-height:1.55; color:var(--text); }
+  .voice-transcript i { color:var(--text-dim); font-style:normal; }
+  .voice-transcript .vt-empty { color:var(--text-dim); }
+  .voice-type-row { display:flex; gap:8px; margin-top:10px; }
   .scan-view { position:relative; line-height:0; }
   /* рамка прицела: показывает, куда наводить, чтобы штрихкод попал в кадр целиком */
   .scan-frame { position:absolute; left:8%; right:8%; top:28%; bottom:28%; pointer-events:none; }
@@ -520,6 +528,29 @@
     <div id="reviewList"></div>
     <button class="btn" onclick="confirmReview()" style="width:100%;margin-top:14px">+ ДОБАВИТЬ ВСЁ (<span id="reviewCount">0</span>)</button>
     <div class="hint" style="margin-top:8px">≈ оценка — порцию прикинул AI, проверьте количество. Меняешь количество — КБЖУ пересчитывается автоматически. Лишнее убери крестиком.</div>
+  </div>
+</div>
+
+<!-- ГОЛОСОВОЙ ВВОД -->
+<div class="overlay" id="voiceOverlay">
+  <div class="overlay-box" style="max-width:460px">
+    <div class="overlay-title"><span>// ГОВОРИТЕ</span><span class="overlay-close" onclick="cancelVoice()">✕ отмена</span></div>
+
+    <div class="voice-live" id="voiceListenRow">
+      <span class="voice-dot"></span>
+      <span>Записываю</span>
+      <span class="voice-timer" id="voiceTimer">0:00</span>
+    </div>
+
+    <div class="voice-transcript" id="voiceTranscript"></div>
+
+    <div class="voice-type-row" id="voiceTypeRow" style="display:none">
+      <input class="inp" id="voiceTypeInput" placeholder="напишите, что съели" onkeydown="if(event.key==='Enter')submitTypedVoice()">
+      <button class="btn small" onclick="submitTypedVoice()">готово</button>
+    </div>
+
+    <div class="hint" style="margin-top:8px">Говорите свободно, можно с паузами: «съела курицу, 100 грамм творога, морковку». Когда закончите — «Готово».</div>
+    <button class="btn" id="voiceDoneBtn" onclick="finishVoice()" style="width:100%;margin-top:12px">ГОТОВО — РАСПОЗНАТЬ</button>
   </div>
 </div>
 
@@ -1716,37 +1747,130 @@ function fileToBase64(file) {
   });
 }
 
-let voiceRecognition = null;
-// Общий голосовой ввод: тап — старт, повторный тап — стоп и обработка. onFinalText(text) — что делать с распознанной речью.
+// ───────── ГОЛОСОВОЙ ВВОД ─────────
+// Окно с живым текстом и явной кнопкой «Готово». Safari на iPhone часто обрывает
+// распознавание сам и не всегда шлёт onend — поэтому здесь авто-перезапуск и
+// принудительное завершение по таймеру, чтобы кнопка не залипала.
+const voice = { rec:null, btnId:null, onDone:null, final:'', interim:'', active:false, stopping:false, tick:null, failsafe:null, startedAt:0 };
+
+function voiceUI(show) {
+  document.getElementById('voiceOverlay').classList.toggle('show', show);
+  const btn = voice.btnId && document.getElementById(voice.btnId);
+  if (btn) btn.classList.toggle('listening', show);
+}
+
+function renderTranscript() {
+  const el = document.getElementById('voiceTranscript');
+  if (!el) return;
+  const txt = (voice.final + voice.interim).trim();
+  el.innerHTML = txt ? escAttr(voice.final) + '<i>' + escAttr(voice.interim) + '</i>'
+                     : '<span class="vt-empty">…слушаю, говорите</span>';
+  el.scrollTop = el.scrollHeight;
+  const ok = document.getElementById('voiceDoneBtn');
+  if (ok) ok.disabled = !txt;
+}
+
 function listenVoice(btnId, onFinalText) {
-  if (voiceRecognition) { try { voiceRecognition.stop(); } catch(e){} return; }
+  if (voice.active) { finishVoice(); return; }       // повторное нажатие = закончить
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { toast('Голосовой ввод не поддерживается в этом браузере'); return; }
   if (!state.settings.geminiKey) { toast('Добавьте Gemini-ключ в Настройках — без него КБЖУ не посчитается'); return; }
-  const btn = document.getElementById(btnId);
-  const recognition = new SR();
-  voiceRecognition = recognition;
-  recognition.lang = 'ru-RU';
-  recognition.interimResults = true;
-  recognition.continuous = true; // даём наговорить с паузами
-  let transcript = '';
-  if (btn) btn.classList.add('listening');
-  toast('Слушаю… говорите, потом нажмите 🎤 ещё раз');
-  recognition.onresult = (e) => {
-    transcript = '';
-    for (let i = 0; i < e.results.length; i++) {
-      if (e.results[i].isFinal) transcript += e.results[i][0].transcript + ' ';
+
+  voice.btnId = btnId; voice.onDone = onFinalText;
+  voice.final = ''; voice.interim = ''; voice.stopping = false; voice.startedAt = Date.now();
+  voice.active = true;
+  voiceUI(true);
+  renderTranscript();
+
+  // нет распознавания речи (например, старый Safari) — даём набрать текстом
+  document.getElementById('voiceTypeRow').style.display = SR ? 'none' : 'flex';
+  document.getElementById('voiceListenRow').style.display = SR ? 'flex' : 'none';
+  if (!SR) { document.getElementById('voiceTypeInput').focus(); return; }
+
+  clearInterval(voice.tick);
+  voice.tick = setInterval(() => {
+    const s = Math.floor((Date.now() - voice.startedAt) / 1000);
+    const el = document.getElementById('voiceTimer');
+    if (el) el.textContent = Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+  }, 500);
+
+  startRecognition(SR);
+}
+
+function startRecognition(SR) {
+  const rec = new SR();
+  voice.rec = rec;
+  rec.lang = 'ru-RU';
+  rec.interimResults = true;
+  rec.continuous = true;
+
+  rec.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) voice.final += r[0].transcript + ' ';
+      else interim += r[0].transcript;
+    }
+    voice.interim = interim;
+    renderTranscript();
+  };
+
+  rec.onerror = (e) => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      voice.active = false; cleanupVoice();
+      toast('Нет доступа к микрофону — разрешите его в настройках браузера');
+    } else if (e.error === 'no-speech') {
+      // ничего не сказали — просто продолжаем слушать
     }
   };
-  recognition.onerror = (e) => { toast('Ошибка распознавания речи: ' + e.error); };
-  recognition.onend = async () => {
-    if (btn) btn.classList.remove('listening');
-    voiceRecognition = null;
-    const text = transcript.trim();
-    if (!text) { toast('Не расслышал — попробуйте ещё раз'); return; }
-    await onFinalText(text);
+
+  rec.onend = () => {
+    if (voice.stopping || !voice.active) { completeVoice(); return; }
+    // Safari обрывает распознавание после паузы — молча продолжаем слушать
+    try { rec.start(); } catch(e) { setTimeout(() => { if (voice.active && !voice.stopping) { try { startRecognition(SR); } catch(err){} } }, 300); }
   };
-  recognition.start();
+
+  try { rec.start(); } catch(e) { /* уже запущено */ }
+}
+
+// «Готово» — останавливаем и отправляем на распознавание КБЖУ
+function finishVoice() {
+  if (!voice.active || voice.stopping) return;
+  voice.stopping = true;
+  try { voice.rec && voice.rec.stop(); } catch(e) {}
+  // подстраховка: если onend не придёт (бывает на iPhone) — завершаем сами
+  clearTimeout(voice.failsafe);
+  voice.failsafe = setTimeout(() => { try { voice.rec && voice.rec.abort(); } catch(e){} completeVoice(); }, 1200);
+}
+
+function cancelVoice() {
+  voice.active = false; voice.stopping = true;
+  try { voice.rec && voice.rec.abort(); } catch(e) {}
+  cleanupVoice();
+}
+
+function cleanupVoice() {
+  clearInterval(voice.tick); clearTimeout(voice.failsafe);
+  voice.rec = null; voice.active = false; voice.stopping = false;
+  voiceUI(false);
+}
+
+async function completeVoice() {
+  if (!voice.active && !voice.stopping) return;
+  const text = (voice.final + ' ' + voice.interim).trim();
+  const done = voice.onDone;
+  cleanupVoice();
+  if (!text) { toast('Не расслышал — попробуйте ещё раз'); return; }
+  if (done) await done(text);
+}
+
+// ручной ввод, если распознавание речи недоступно
+async function submitTypedVoice() {
+  const val = document.getElementById('voiceTypeInput').value.trim();
+  if (!val) return;
+  const done = voice.onDone;
+  document.getElementById('voiceTypeInput').value = '';
+  cleanupVoice();
+  if (done) await done(val);
 }
 
 function startVoice() {
@@ -2444,9 +2568,9 @@ let updateReady = false;
 
 // Занята ли пользовательница прямо сейчас? Тогда перезагружать НЕЛЬЗЯ.
 function isBusyNow() {
-  const overlays = ['reviewOverlay','dishOverlay','editOverlay','scannerOverlay','authOverlay'];
+  const overlays = ['reviewOverlay','dishOverlay','editOverlay','scannerOverlay','authOverlay','voiceOverlay'];
   if (overlays.some(id => { const el = document.getElementById(id); return el && el.classList.contains('show'); })) return true;
-  if (aiBusy || voiceRecognition) return true;
+  if (aiBusy || voice.active) return true;
   const typed = ['foodName','foodAmount','dishName','dishIngText','manualBarcodeInput','weightInput']
     .some(id => { const el = document.getElementById(id); return el && el.value && String(el.value).trim(); });
   return typed;
