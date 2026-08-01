@@ -212,6 +212,14 @@
   .manual-barcode-row { display:none; gap:8px; margin-top:12px; }
   .scan-actions { display:flex; gap:8px; margin-top:10px; }
   .scan-actions .btn { flex:1; }
+  .scan-view { position:relative; line-height:0; }
+  /* рамка прицела: показывает, куда наводить, чтобы штрихкод попал в кадр целиком */
+  .scan-frame { position:absolute; left:8%; right:8%; top:28%; bottom:28%; pointer-events:none; }
+  .scan-frame span { position:absolute; width:26px; height:26px; border:2px solid var(--cyan); box-shadow:0 0 10px rgba(0,255,224,.5); }
+  .scan-frame span:nth-child(1) { top:0; left:0; border-right:none; border-bottom:none; }
+  .scan-frame span:nth-child(2) { top:0; right:0; border-left:none; border-bottom:none; }
+  .scan-frame span:nth-child(3) { bottom:0; left:0; border-right:none; border-top:none; }
+  .scan-frame span:nth-child(4) { bottom:0; right:0; border-left:none; border-top:none; }
 
   /* REVIEW SHEET */
   .review-meal-row { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
@@ -485,11 +493,13 @@
 <div class="overlay" id="scannerOverlay">
   <div class="overlay-box">
     <div class="overlay-title"><span>// СКАНЕР ШТРИХКОДА</span><span class="overlay-close" onclick="closeScanner()">✕ закрыть</span></div>
-    <video id="scannerVideo" autoplay playsinline muted></video>
+    <div class="scan-view">
+      <video id="scannerVideo" autoplay playsinline muted></video>
+      <div class="scan-frame" id="scanFrame" style="display:none"><span></span><span></span><span></span><span></span></div>
+    </div>
     <div class="scan-status" id="scanStatus">Наведите камеру на штрихкод...</div>
     <div class="scan-actions">
-      <button class="btn small" onclick="openBarcodePhoto()" id="barcodePhotoBtn">📷 Сфотографировать штрихкод</button>
-      <button class="btn outline small" onclick="grabBarcodeFrame()">снять кадр</button>
+      <button class="btn outline small" onclick="openBarcodePhoto()" id="barcodePhotoBtn">не читается — сфотографировать</button>
     </div>
     <div class="manual-barcode-row" id="manualBarcodeRow">
       <input class="inp" id="manualBarcodeInput" inputmode="numeric" pattern="[0-9]*" placeholder="или впишите номер под штрихкодом" onkeydown="if(event.key==='Enter')lookupBarcode(this.value)">
@@ -1305,6 +1315,7 @@ function loadScript(src) {
 let scanEngine = '';        // какой движок сейчас читает
 let zxingStarted = false;   // запасной уже запущен
 let scanWatchdog = null;
+let scanHintTimer = null;
 
 function scanStatus(msg) { const el = document.getElementById('scanStatus'); if (el) el.textContent = msg; }
 
@@ -1347,9 +1358,13 @@ async function openScanner() {
   for (let i = 0; i < 40 && scannerActive && !video.videoWidth; i++) await new Promise(r => setTimeout(r, 50));
   if (!scannerActive) return;
 
-  // на iPhone живое сканирование в Safari капризное — сразу подсказываем надёжный путь
-  scanStatus(isIOS ? 'Наведите камеру на штрихкод. Если не читается — «Сфотографировать штрихкод»'
-                   : 'Наведите камеру на штрихкод…');
+  scanStatus('Наведите штрихкод в рамку');
+  document.getElementById('scanFrame').style.display = 'block';
+  // если за 8 секунд ничего не поймалось — подсказываем запасной путь, но не мешаем читать
+  clearTimeout(scanHintTimer);
+  scanHintTimer = setTimeout(() => {
+    if (scannerActive) scanStatus('Не ловится? Поднесите ближе, чтобы полосы заняли рамку по ширине');
+  }, 8000);
 
   // 1) встроенный детектор (Chrome/Android) — быстрый, но иногда молча не работает
   let nativeOk = false;
@@ -1386,10 +1401,16 @@ async function startZxing(video, asBackup) {
     if (!scannerActive) return;
     const reader = new NS.BrowserMultiFormatReader();
     scanEngine = asBackup ? 'native+zxing' : 'zxing';
-    scanStatus('Наведите камеру на штрихкод…');
-    zxingControls = await reader.decodeFromVideoElement(video, (result) => {
-      if (result && scannerActive) onBarcodeDetected(result.getText());
-    });
+    const onResult = (result) => { if (result && scannerActive) onBarcodeDetected(result.getText()); };
+    // decodeFromStream сам корректно цепляет поток к видео (playsinline/muted/play) —
+    // на Safari это работает надёжнее, чем ручная привязка
+    if (scannerStream && reader.decodeFromStream) {
+      zxingControls = await reader.decodeFromStream(scannerStream, video, onResult);
+    } else {
+      zxingControls = await reader.decodeFromVideoElement(video, onResult);
+    }
+    startFrameFallback();
+    if (scannerActive) scanStatus('Наведите штрихкод в рамку');
   } catch(e) {
     zxingStarted = false;
     if (!asBackup) scanStatus('Сканер недоступен (' + e.message + '). Введите номер вручную ↓');
@@ -1414,14 +1435,22 @@ function nativeScanLoop(video, detector, errors) {
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-function openBarcodePhoto() {
-  // на iOS родная камера конфликтует с живым потоком — освобождаем камеру
-  if (isIOS) {
-    if (zxingControls) { try { zxingControls.stop(); } catch(e){} zxingControls = null; }
-    if (scannerStream) { scannerStream.getTracks().forEach(t => t.stop()); scannerStream = null; }
-    const v = document.getElementById('scannerVideo'); if (v) v.srcObject = null;
-  }
-  document.getElementById('barcodePhotoInput').click();
+// живой поток НЕ останавливаем — иначе после возврата из камеры остаётся чёрный экран
+function openBarcodePhoto() { document.getElementById('barcodePhotoInput').click(); }
+
+// iOS иногда «замораживает» видео после возврата из родной камеры — оживляем превью
+async function revivePreview() {
+  if (!scannerActive) return;
+  const video = document.getElementById('scannerVideo');
+  const live = scannerStream && scannerStream.getVideoTracks().some(t => t.readyState === 'live');
+  if (live) { if (video.paused) { try { await video.play(); } catch(e){} } return; }
+  try {
+    scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode:{ ideal:'environment' } } });
+    video.srcObject = scannerStream;
+    await video.play();
+    zxingStarted = false; zxingControls = null;
+    startZxing(video);
+  } catch(e) {}
 }
 
 // уменьшаем снимок: 12 Мп с айфона распознаётся медленно и хуже
@@ -1453,36 +1482,42 @@ document.getElementById('barcodePhotoInput').addEventListener('change', async (e
         if (res) { onBarcodeDetected(res.getText()); return; }
       } catch (err) { /* пробуем следующий вариант */ }
     }
-    scanStatus('Штрихкод не распознан. Снимите ближе, чтобы полосы занимали кадр по ширине, без бликов — или введите номер вручную ↓');
+    scanStatus('На снимке штрихкод не виден. Наведите камеру в рамку или введите номер вручную ↓');
+    revivePreview();
   } catch (err) {
     scanStatus('Не удалось разобрать снимок: ' + err.message + '. Введите номер вручную ↓');
+    revivePreview();
   } finally {
     URL.revokeObjectURL(url);
   }
 });
 
-// снимок кадра и разбор картинки — надёжнее живого сканирования на слабых камерах
-async function grabBarcodeFrame() {
-  const video = document.getElementById('scannerVideo');
-  if (!video || !video.videoWidth) { toast('Камера ещё не готова'); return; }
-  scanStatus('Распознаю снимок…');
-  try {
-    await loadScript(ZXING_URL);
-    const c = document.createElement('canvas');
-    c.width = video.videoWidth; c.height = video.videoHeight;
-    c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
-    const reader = new window.ZXingBrowser.BrowserMultiFormatReader();
-    const res = await reader.decodeFromCanvas(c);
-    onBarcodeDetected(res.getText());
-  } catch(e) {
-    scanStatus('На снимке штрихкод не распознан — наведите ближе и ровнее, либо введите номер вручную ↓');
-  }
+// Молчаливая вторая попытка: разбираем полный кадр видео в исходном разрешении.
+// Непрерывный декодер работает по уменьшенной картинке и мелкие штрихкоды пропускает.
+let frameTryTimer = null;
+
+function startFrameFallback() {
+  clearInterval(frameTryTimer);
+  frameTryTimer = setInterval(async () => {
+    if (!scannerActive) { clearInterval(frameTryTimer); return; }
+    const video = document.getElementById('scannerVideo');
+    if (!video || !video.videoWidth || !window.ZXingBrowser) return;
+    try {
+      const c = document.createElement('canvas');
+      c.width = video.videoWidth; c.height = video.videoHeight;
+      c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+      const reader = new window.ZXingBrowser.BrowserMultiFormatReader();
+      const res = await reader.decodeFromCanvas(c);
+      if (res && scannerActive) onBarcodeDetected(res.getText());
+    } catch(e) { /* в этом кадре не нашлось — пробуем следующий */ }
+  }, 2200);
 }
 
 function closeScanner() {
   scannerActive = false;
-  clearTimeout(scanWatchdog);
+  clearTimeout(scanWatchdog); clearTimeout(scanHintTimer); clearInterval(frameTryTimer);
   zxingStarted = false; scanEngine = '';
+  const frame = document.getElementById('scanFrame'); if (frame) frame.style.display = 'none';
   if (zxingControls) { try { zxingControls.stop(); } catch(e){} zxingControls = null; }
   if (scannerStream) { scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
   const v = document.getElementById('scannerVideo');
