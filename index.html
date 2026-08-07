@@ -220,6 +220,17 @@
   .voice-transcript i { color:var(--text-dim); font-style:normal; }
   .voice-transcript .vt-empty { color:var(--text-dim); }
   .voice-type-row { display:flex; gap:8px; margin-top:10px; }
+  /* второстепенное действие: пунктирная рамка, приглушённый цвет, перенос текста разрешён */
+  .btn-add { width:100%; margin-top:10px; padding:11px 12px; border:1px dashed var(--border); background:transparent;
+             color:var(--text-dim); font-family:'Share Tech Mono',monospace; font-size:.7rem; letter-spacing:.08em;
+             cursor:pointer; transition:all .15s; white-space:normal; }
+  .btn-add:hover:not(:disabled) { border-color:rgba(0,255,224,.5); color:var(--cyan); }
+  .btn-add:disabled { opacity:.35; cursor:not-allowed; }
+  /* главное действие: залитая кнопка — её видно первой */
+  .btn.primary { width:100%; margin-top:12px; background:var(--cyan); color:var(--bg); font-weight:700; font-size:.76rem;
+                 padding:14px 20px; text-shadow:none; box-shadow:0 0 18px rgba(0,255,224,.35); white-space:normal; }
+  .btn.primary:hover:not(:disabled) { background:#5CFFEC; box-shadow:0 0 26px rgba(0,255,224,.5); }
+  .btn.primary:disabled { background:var(--bg3); color:var(--text-dim); box-shadow:none; border-color:var(--border); }
   .voice-photos { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
   .voice-photos:empty { display:none; }
   .vp-item { position:relative; width:64px; height:64px; border:1px solid var(--border); overflow:hidden; }
@@ -555,10 +566,10 @@
     </div>
 
     <div class="voice-photos" id="voicePhotos"></div>
-    <button class="btn outline small" onclick="addVoicePhoto()" id="voicePhotoBtn" style="width:100%;margin-top:10px">📷 добавить фото — упаковку или блюдо</button>
+    <button class="btn-add" onclick="addVoicePhoto()" id="voicePhotoBtn">📷 Добавить фото</button>
 
-    <div class="hint" style="margin-top:8px">Говорите свободно, можно с паузами. Фото упаковки помогает точнее посчитать: с него читается состав и таблица пищевой ценности.</div>
-    <button class="btn" id="voiceDoneBtn" onclick="finishVoice()" style="width:100%;margin-top:12px">ГОТОВО — РАСПОЗНАТЬ</button>
+    <div class="hint" style="margin-top:8px">Говорите свободно, можно с паузами. Фото упаковки помогает точнее посчитать — с него читается таблица пищевой ценности.</div>
+    <button class="btn primary" id="voiceDoneBtn" onclick="finishVoice()">ГОТОВО — РАСПОЗНАТЬ</button>
   </div>
 </div>
 
@@ -1800,8 +1811,7 @@ function renderVoicePhotos() {
   const btn = document.getElementById('voicePhotoBtn');
   if (btn) {
     btn.disabled = voice.photos.length >= MAX_VOICE_PHOTOS;
-    btn.textContent = voice.photos.length ? `📷 добавить ещё фото (${voice.photos.length})`
-                                          : '📷 добавить фото — упаковку или блюдо';
+    btn.textContent = voice.photos.length ? `📷 Ещё фото (${voice.photos.length})` : '📷 Добавить фото';
   }
   renderTranscript();
 }
