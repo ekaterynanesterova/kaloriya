@@ -54,12 +54,16 @@
 
   .panel { display:none; } .panel.active { display:block; animation: fadeUp .3s ease both; }
 
-  .date-nav { display:flex; align-items:center; gap:8px; margin-top:20px; flex-wrap:wrap; }
-  .date-nav-btn { width:34px; height:34px; min-width:34px; border:1px solid var(--border); background:var(--bg2); color:var(--text-dim); cursor:pointer; font-size:.75rem; transition:all .15s; }
+  /* компактная строка даты: занимала слишком много места ради одной даты */
+  .date-nav { display:flex; align-items:center; gap:4px; margin-top:12px; }
+  .date-nav-btn { width:28px; height:28px; min-width:28px; border:1px solid var(--border); background:transparent; color:var(--text-dim); cursor:pointer; font-size:.66rem; transition:all .15s; padding:0; }
   .date-nav-btn:hover:not(:disabled) { border-color:var(--cyan); color:var(--cyan); }
   .date-nav-btn:disabled { opacity:.25; cursor:not-allowed; }
-  .date-nav-input { max-width:160px; flex:0; padding:7px 10px; font-size:.74rem; }
-  .date-nav-label { font-size:.66rem; letter-spacing:.14em; text-transform:uppercase; color:var(--cyan); text-shadow:0 0 8px rgba(0,255,224,.4); }
+  .date-nav-input { width:auto; max-width:135px; flex:0 0 auto; padding:4px 8px; font-size:.68rem; background:transparent; border-color:var(--border); }
+  .date-today-link { background:none; border:none; cursor:pointer; color:var(--text-dim); font-family:'Share Tech Mono',monospace; font-size:.66rem; letter-spacing:.06em; padding:4px 6px; margin-left:2px; }
+  .date-today-link:hover { color:var(--cyan); }
+  .day-tools { margin-top:22px; padding-top:14px; border-top:1px solid var(--border); }
+  .day-tools .btn-add { margin-top:0; }
   .today-grid { margin-top:16px; }
   .stat-card { border:1px solid var(--border); background:var(--panel); padding:18px; position:relative; overflow:hidden; }
   .stat-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:var(--cyan); box-shadow:var(--cyan-glow); }
@@ -216,10 +220,14 @@
   .voice-live { display:flex; align-items:center; gap:10px; font-size:.7rem; letter-spacing:.14em; text-transform:uppercase; color:var(--magenta); margin-bottom:10px; }
   .voice-dot { width:11px; height:11px; min-width:11px; border-radius:50%; background:var(--magenta); box-shadow:0 0 10px var(--magenta); animation:pulse 1s infinite; }
   .voice-timer { margin-left:auto; font-family:'Orbitron',monospace; color:var(--text); letter-spacing:.05em; }
-  .voice-transcript { min-height:96px; max-height:34vh; overflow-y:auto; border:1px solid var(--border); background:var(--bg2); padding:12px; font-size:.86rem; line-height:1.55; color:var(--text); }
-  .voice-transcript i { color:var(--text-dim); font-style:normal; }
-  .voice-transcript .vt-empty { color:var(--text-dim); }
-  .voice-type-row { display:flex; gap:8px; margin-top:10px; }
+  .voice-transcript { display:block; width:100%; min-height:96px; max-height:34vh; overflow-y:auto; resize:vertical;
+                      border:1px solid var(--border); background:var(--bg2); padding:12px; color:var(--text);
+                      font-family:'Share Tech Mono',monospace; font-size:.86rem; line-height:1.55; outline:none; }
+  .voice-transcript:focus { border-color:rgba(0,255,224,.5); box-shadow:0 0 0 1px rgba(0,255,224,.15); }
+  .voice-transcript::placeholder { color:var(--text-dim); }
+  .voice-interim { min-height:18px; margin-top:6px; font-size:.8rem; color:var(--text-dim); font-style:italic; }
+  .voice-interim:empty { min-height:0; }
+  .voice-edit-hint { font-size:.65rem; color:var(--text-dim); margin-top:4px; }
   /* второстепенное действие: пунктирная рамка, приглушённый цвет, перенос текста разрешён */
   .btn-add { width:100%; margin-top:10px; padding:11px 12px; border:1px dashed var(--border); background:transparent;
              color:var(--text-dim); font-family:'Share Tech Mono',monospace; font-size:.7rem; letter-spacing:.08em;
@@ -271,15 +279,15 @@
     button, .quick-chip, .meal-btn, .tab-btn { touch-action:manipulation; -webkit-tap-highlight-color:rgba(0,255,224,.15); }
     .tab-btn { padding:14px 16px; }
     .icon-btn { width:46px; height:46px; min-width:46px; font-size:1.15rem; }
-    .date-nav-btn { width:42px; height:42px; min-width:42px; }
-    .date-nav-input { padding:11px 10px; }
     .btn { padding:13px 20px; }
     .btn.small { padding:10px 14px; }
     .section-label .sl-action { padding:10px 14px; }
     .section-label { flex-wrap:wrap; gap:8px; }
     .quick-chip { padding:11px 13px; font-size:.7rem; flex:0 0 auto; }
     /* чуть плотнее, чтобы поле ввода и кнопки 🎤📷 помещались на первый экран */
-    .date-nav { margin-top:14px; }
+    .date-nav { margin-top:10px; }
+    .date-nav-btn { width:32px; height:32px; min-width:32px; }
+    .date-nav-input { padding:5px 8px; font-size:.7rem; }
     .stat-card { padding:14px; }
     .meal-bar { margin-top:12px; gap:6px; }
     .meal-btn { padding:7px 4px; }
@@ -339,9 +347,7 @@
       <button class="date-nav-btn" onclick="shiftSelectedDate(-1)" title="предыдущий день">◀</button>
       <input class="inp date-nav-input" id="dayPicker" type="date" onchange="setSelectedDate(this.value)">
       <button class="date-nav-btn" id="dayNextBtn" onclick="shiftSelectedDate(1)" title="следующий день">▶</button>
-      <span class="date-nav-label" id="dayLabel"></span>
-      <button class="btn outline small" id="backToTodayBtn" onclick="setSelectedDate(todayKey())" style="display:none">сегодня</button>
-      <button class="btn outline small" onclick="repeatPrevDay()" title="перенести записи прошлого дня">↻ повторить вчера</button>
+      <button class="date-today-link" id="backToTodayBtn" onclick="setSelectedDate(todayKey())" style="display:none">↩ сегодня</button>
     </div>
     <div class="today-grid">
       <div class="stat-card">
@@ -413,13 +419,14 @@
     </div>
     <div class="quick-foods" id="dishList"></div>
 
-    <div class="section-label">
-      <span class="sl-text">быстрое добавление</span>
-      <button class="sl-action" onclick="refreshQuickAdd()">↻ обновить</button>
-    </div>
+    <div class="section-label"><span class="sl-text">быстрое добавление</span></div>
     <div class="quick-foods" id="quickFoods"></div>
 
     <div class="food-list" id="foodList"></div>
+
+    <div class="day-tools">
+      <button class="btn-add" onclick="repeatPrevDay()" title="перенести записи прошлого дня">↻ повторить вчерашний день</button>
+    </div>
   </div>
 
   <!-- WEIGHT -->
@@ -559,11 +566,10 @@
       <span class="voice-timer" id="voiceTimer">0:00</span>
     </div>
 
-    <div class="voice-transcript" id="voiceTranscript"></div>
-
-    <div class="voice-type-row" id="voiceTypeRow" style="display:none">
-      <input class="inp" id="voiceTypeInput" placeholder="напишите, что съели" onkeydown="if(event.key==='Enter')finishVoice()">
-    </div>
+    <textarea class="voice-transcript" id="voiceTranscript" rows="4"
+              placeholder="…слушаю, говорите" oninput="onTranscriptEdit()"></textarea>
+    <div class="voice-interim" id="voiceInterim"></div>
+    <div class="voice-edit-hint">Текст можно исправить прямо здесь — сотрите лишнее или допишите</div>
 
     <div class="voice-photos" id="voicePhotos"></div>
     <button class="btn-add" onclick="addVoicePhoto()" id="voicePhotoBtn">📷 Добавить фото</button>
@@ -814,6 +820,7 @@ function renderToday() {
   renderMiniBars();
   renderProductNames();
   renderDishes();
+  renderQuickFoods();   // список обновляется сам после каждой записи
 }
 
 function renderFoodList(items, dayKey) {
@@ -840,8 +847,6 @@ function renderFoodList(items, dayKey) {
 function renderDateNav() {
   const picker = document.getElementById('dayPicker');
   if (picker) { picker.value = selectedDate; picker.max = todayKey(); }
-  const lbl = document.getElementById('dayLabel');
-  if (lbl) lbl.textContent = humanDate(selectedDate);
   const next = document.getElementById('dayNextBtn');
   if (next) next.disabled = selectedDate >= todayKey();
   const back = document.getElementById('backToTodayBtn');
@@ -939,10 +944,27 @@ function renderMiniBars() {
 }
 
 // ───────────────────────── QUICK ADD (frequency-based) ─────────────────────────
+// Топ считаем по РЕАЛЬНЫМ записям за последние 30 дней, а не по общему счётчику:
+// иначе стартовые продукты навсегда занимают первые места, а привычки не видны.
 function topProducts(n=10) {
-  return Object.values(state.products)
-    .sort((a,b) => (b.usageCount-a.usageCount) || ((b.lastUsed||'').localeCompare(a.lastUsed||'')))
-    .slice(0, n);
+  const since = shiftKey(todayKey(), -29);
+  const recent = {};
+  Object.keys(state.entries).forEach(d => {
+    if (d < since) return;
+    (state.entries[d] || []).forEach(it => {
+      const k = normKey(it.name || '');
+      if (k) recent[k] = (recent[k] || 0) + 1;
+    });
+  });
+  return Object.keys(state.products)
+    .map(k => ({ k, p: state.products[k], recent: recent[k] || 0 }))
+    .sort((a, b) =>
+      (b.recent - a.recent) ||
+      ((b.p.usageCount || 0) - (a.p.usageCount || 0)) ||
+      ((b.p.lastUsed || '').localeCompare(a.p.lastUsed || ''))
+    )
+    .slice(0, n)
+    .map(x => x.p);
 }
 
 function renderQuickFoods() {
@@ -953,7 +975,6 @@ function renderQuickFoods() {
   }).join('');
 }
 
-function refreshQuickAdd() { renderQuickFoods(); toast('Топ продуктов обновлён'); }
 
 function quickAdd(key) {
   const p = state.products[key];
@@ -1835,18 +1856,33 @@ function voiceUI(show) {
   if (btn) btn.classList.toggle('listening', show);
 }
 
+function transcriptText() {
+  const el = document.getElementById('voiceTranscript');
+  return el ? el.value : '';
+}
+
+// распознанное дописывается в конец, но текст остаётся редактируемым —
+// курсор не трогаем, если пользовательница сейчас правит середину
+function appendTranscript(text) {
+  const el = document.getElementById('voiceTranscript');
+  if (!el || !text.trim()) return;
+  const cur = el.value.replace(/\s+$/, '');
+  el.value = (cur ? cur + ' ' : '') + text.trim();
+  if (document.activeElement !== el) el.scrollTop = el.scrollHeight;
+}
+
 function renderTranscript() {
   const el = document.getElementById('voiceTranscript');
   if (!el) return;
-  const txt = (voice.final + voice.interim).trim();
-  el.innerHTML = txt ? escAttr(voice.final) + '<i>' + escAttr(voice.interim) + '</i>'
-                     : '<span class="vt-empty">' + (voice.photos.length ? 'можно ничего не говорить — разберу по фото' : '…слушаю, говорите') + '</span>';
-  el.scrollTop = el.scrollHeight;
-  // «Готово» доступно, если есть речь ИЛИ хотя бы одно фото
+  el.placeholder = voice.photos.length ? 'можно ничего не говорить — разберу по фото' : '…слушаю, говорите';
+  const int = document.getElementById('voiceInterim');
+  if (int) int.textContent = voice.interim || '';
+  // «Готово» доступно, если есть текст ИЛИ хотя бы одно фото
   const ok = document.getElementById('voiceDoneBtn');
-  const typed = (document.getElementById('voiceTypeInput') || {}).value || '';
-  if (ok) ok.disabled = !txt && !voice.photos.length && !typed.trim();
+  if (ok) ok.disabled = !transcriptText().trim() && !voice.interim.trim() && !voice.photos.length;
 }
+
+function onTranscriptEdit() { renderTranscript(); }
 
 function listenVoice(btnId, onFinalText) {
   if (voice.active) { finishVoice(); return; }       // повторное нажатие = закончить
@@ -1857,13 +1893,14 @@ function listenVoice(btnId, onFinalText) {
   voice.final = ''; voice.interim = ''; voice.stopping = false; voice.startedAt = Date.now();
   voice.photos = [];
   voice.active = true;
+  const ta = document.getElementById('voiceTranscript');
+  if (ta) ta.value = '';
   voiceUI(true);
   renderVoicePhotos();
 
-  // нет распознавания речи (например, старый Safari) — даём набрать текстом
-  document.getElementById('voiceTypeRow').style.display = SR ? 'none' : 'flex';
+  // нет распознавания речи (например, старый Safari) — просто печатаем в том же поле
   document.getElementById('voiceListenRow').style.display = SR ? 'flex' : 'none';
-  if (!SR) { document.getElementById('voiceTypeInput').focus(); return; }
+  if (!SR) { if (ta) { ta.placeholder = 'напишите, что съели'; ta.focus(); } return; }
 
   clearInterval(voice.tick);
   voice.tick = setInterval(() => {
@@ -1886,7 +1923,7 @@ function startRecognition(SR) {
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const r = e.results[i];
-      if (r.isFinal) voice.final += r[0].transcript + ' ';
+      if (r.isFinal) appendTranscript(r[0].transcript);
       else interim += r[0].transcript;
     }
     voice.interim = interim;
@@ -1931,19 +1968,19 @@ function cancelVoice() {
 function cleanupVoice() {
   clearInterval(voice.tick); clearTimeout(voice.failsafe);
   voice.rec = null; voice.active = false; voice.stopping = false;
-  voice.photos = [];
+  voice.photos = []; voice.interim = '';
   const el = document.getElementById('voicePhotos'); if (el) el.innerHTML = '';
+  const ta = document.getElementById('voiceTranscript'); if (ta) ta.value = '';
+  const int = document.getElementById('voiceInterim'); if (int) int.textContent = '';
   voiceUI(false);
 }
 
 async function completeVoice() {
   if (!voice.active && !voice.stopping) return;
-  const typed = (document.getElementById('voiceTypeInput') || {}).value || '';
-  const text = ((voice.final + ' ' + voice.interim).trim() || typed.trim());
+  // берём именно то, что видно в поле — с учётом правок
+  const text = (transcriptText() + ' ' + voice.interim).trim();
   const photos = voice.photos.slice();
   const done = voice.onDone;
-  const typeInput = document.getElementById('voiceTypeInput');
-  if (typeInput) typeInput.value = '';
   cleanupVoice();
   if (!text && !photos.length) { toast('Не расслышал — попробуйте ещё раз'); return; }
   if (done) await done(text, photos);
