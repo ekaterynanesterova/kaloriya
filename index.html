@@ -228,6 +228,13 @@
   .voice-interim { min-height:18px; margin-top:6px; font-size:.8rem; color:var(--text-dim); font-style:italic; }
   .voice-interim:empty { min-height:0; }
   .voice-edit-hint { font-size:.65rem; color:var(--text-dim); margin-top:4px; }
+  /* выбор порции блюда */
+  .portion-info { font-size:.78rem; color:var(--text-dim); margin-bottom:12px; }
+  .portion-info b { font-family:'Orbitron',monospace; color:var(--cyan); font-size:.95rem; }
+  .portion-quick { display:flex; gap:6px; }
+  .portion-btn { flex:1; font-family:'Share Tech Mono',monospace; font-size:.82rem; padding:10px 6px; border:1px solid var(--border); background:var(--bg2); color:var(--text); cursor:pointer; transition:all .15s; }
+  .portion-btn:hover { border-color:var(--cyan); color:var(--cyan); background:var(--cyan-dim); }
+  .portion-unit { font-size:.72rem; color:var(--text-dim); }
   /* встроенная запись внутри окна блюда */
   .voice-slot { margin-top:12px; border:1px solid var(--cyan); background:var(--bg2); padding:12px; animation:fadeUp .25s ease both; }
   .voice-slot .overlay-title { margin-bottom:10px; }
@@ -556,6 +563,28 @@
     <div id="reviewList"></div>
     <button class="btn" onclick="confirmReview()" style="width:100%;margin-top:14px">+ ДОБАВИТЬ ВСЁ (<span id="reviewCount">0</span>)</button>
     <div class="hint" style="margin-top:8px">≈ оценка — порцию прикинул AI, проверьте количество. Меняешь количество — КБЖУ пересчитывается автоматически. Лишнее убери крестиком.</div>
+  </div>
+</div>
+
+<!-- СКОЛЬКО СЪЕДЕНО ОТ БЛЮДА -->
+<div class="overlay" id="portionOverlay">
+  <div class="overlay-box" style="max-width:400px">
+    <div class="overlay-title"><span id="portionTitle">// ПОРЦИЯ</span><span class="overlay-close" onclick="closePortion()">✕ отмена</span></div>
+    <div class="portion-info" id="portionInfo"></div>
+
+    <div class="portion-quick" id="portionQuick"></div>
+
+    <div class="input-row" style="margin-top:10px">
+      <input class="inp" id="portionAmount" type="number" min="0" step="any" style="max-width:110px" oninput="updatePortionPreview()">
+      <span class="portion-unit" id="portionUnit">г</span>
+      <select class="inp" id="portionMeal" style="flex:1"></select>
+    </div>
+
+    <div class="preview-row" style="margin-top:10px">
+      <span><span class="pv-kcal" id="portionKcal">0</span> ккал · Б <span id="portionProt">0</span>г Ж <span id="portionFat">0</span>г У <span id="portionCarb">0</span>г</span>
+    </div>
+
+    <button class="btn primary" id="portionAddBtn" onclick="confirmPortion()">ДОБАВИТЬ</button>
   </div>
 </div>
 
@@ -1006,17 +1035,100 @@ function renderDishes() {
     el.innerHTML = '<div class="empty" style="margin-top:0;width:100%">&gt; пусто — нажмите «+ блюдо», чтобы сохранить готовое блюдо</div>';
     return;
   }
-  el.innerHTML = state.dishes.map(d =>
-    `<button class="quick-chip" onclick="addDish('${d.id}')">🍽 ${escAttr(d.name)} · <b>${d.kcal}</b></button>`
-  ).join('');
+  el.innerHTML = state.dishes.map(d => {
+    const w = dishWeight(d);
+    return `<button class="quick-chip" onclick="addDish('${d.id}')">🍽 ${escAttr(d.name)}${w ? ' ' + w + 'г' : ''} · <b>${d.kcal}</b></button>`;
+  }).join('');
 }
 
+// Полный вес блюда — сумма ингредиентов. Считаем только если ВСЕ они в граммах/мл,
+// иначе (есть «штуки») вес неизвестен и порцию спрашиваем долями.
+function dishWeight(d) {
+  if (!d || !d.ingredients || !d.ingredients.length) return null;
+  let w = 0;
+  for (const i of d.ingredients) {
+    if (i.unit !== 'g' && i.unit !== 'ml') return null;
+    w += parseFloat(i.amount) || 0;
+  }
+  return w > 0 ? Math.round(w) : null;
+}
+
+let portionDish = null;
+
+// Блюдо больше не падает в дневник целиком — сначала уточняем, сколько съедено
 function addDish(id) {
   const d = state.dishes.find(x => x.id === id);
   if (!d) return;
-  pushEntry({ name:d.name, meal:currentMeal, amount:d.amount||null, unit:d.unit||'pcs',
-    kcal:d.kcal||0, prot:d.prot||0, fat:d.fat||0, carb:d.carb||0, source:'dish' });
-  toast(`${d.name} +${d.kcal} ккал · ${MEALS.find(m=>m.key===currentMeal).label}`);
+  portionDish = d;
+  const w = dishWeight(d);
+
+  document.getElementById('portionTitle').textContent = '// ' + d.name.toUpperCase();
+  document.getElementById('portionInfo').innerHTML = w
+    ? `Всё блюдо: <b>${w} г</b> · ${d.kcal} ккал`
+    : `Всё блюдо: <b>${d.kcal}</b> ккал`;
+
+  const amt = document.getElementById('portionAmount');
+  amt.value = w || 1;
+  document.getElementById('portionUnit').textContent = w ? 'г' : 'порций';
+
+  document.getElementById('portionMeal').innerHTML =
+    MEALS.map(m => `<option value="${m.key}" ${m.key===currentMeal?'selected':''}>${m.icon} ${m.label}</option>`).join('');
+
+  const quick = w ? [['¼', w/4], ['½', w/2], ['¾', w*0.75], ['всё', w]]
+                  : [['¼', 0.25], ['½', 0.5], ['1', 1], ['2', 2]];
+  document.getElementById('portionQuick').innerHTML = quick
+    .map(([label, val]) => `<button class="portion-btn" onclick="setPortion(${Math.round(val*100)/100})">${label}</button>`).join('');
+
+  updatePortionPreview();
+  document.getElementById('portionOverlay').classList.add('show');
+}
+
+function setPortion(v) {
+  document.getElementById('portionAmount').value = v;
+  updatePortionPreview();
+}
+
+// доля блюда: по весу или по количеству порций
+function portionFactor() {
+  const v = parseFloat(document.getElementById('portionAmount').value) || 0;
+  const w = dishWeight(portionDish);
+  return w ? v / w : v;
+}
+
+function updatePortionPreview() {
+  const d = portionDish; if (!d) return;
+  const f = portionFactor();
+  document.getElementById('portionKcal').textContent = Math.round((d.kcal||0) * f);
+  document.getElementById('portionProt').textContent = round1((d.prot||0) * f);
+  document.getElementById('portionFat').textContent  = round1((d.fat||0) * f);
+  document.getElementById('portionCarb').textContent = round1((d.carb||0) * f);
+  const btn = document.getElementById('portionAddBtn');
+  if (btn) btn.disabled = !(f > 0);
+}
+
+function closePortion() { document.getElementById('portionOverlay').classList.remove('show'); portionDish = null; }
+
+function confirmPortion() {
+  const d = portionDish; if (!d) return;
+  const f = portionFactor();
+  if (!(f > 0)) return;
+  const w = dishWeight(d);
+  const amount = parseFloat(document.getElementById('portionAmount').value) || 0;
+  const meal = document.getElementById('portionMeal').value || currentMeal;
+  const kcal = Math.round((d.kcal||0) * f);
+
+  pushEntry({
+    name: d.name, meal, amount, unit: w ? 'g' : 'pcs',
+    kcal, prot: round1((d.prot||0)*f), fat: round1((d.fat||0)*f), carb: round1((d.carb||0)*f),
+    source: 'dish'
+  });
+  // запоминаем как продукт, чтобы блюдо попадало и в быстрое добавление
+  if (amount > 0) {
+    upsertProduct(d.name, w ? 'g' : 'pcs',
+      { kcal:(d.kcal||0)/(w||1), prot:(d.prot||0)/(w||1), fat:(d.fat||0)/(w||1), carb:(d.carb||0)/(w||1) }, amount);
+  }
+  closePortion();
+  toast(`${d.name} · ${amount}${w ? ' г' : ' порц.'} → ${kcal} ккал`);
 }
 
 let editingDishId = null;
@@ -2738,7 +2850,7 @@ let updateReady = false;
 
 // Занята ли пользовательница прямо сейчас? Тогда перезагружать НЕЛЬЗЯ.
 function isBusyNow() {
-  const overlays = ['reviewOverlay','dishOverlay','editOverlay','scannerOverlay','authOverlay','voiceOverlay'];
+  const overlays = ['reviewOverlay','dishOverlay','editOverlay','scannerOverlay','authOverlay','voiceOverlay','portionOverlay'];
   if (overlays.some(id => { const el = document.getElementById(id); return el && el.classList.contains('show'); })) return true;
   if (aiBusy || voice.active) return true;
   const typed = ['foodName','foodAmount','dishName','dishIngText','manualBarcodeInput','weightInput']
