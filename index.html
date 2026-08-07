@@ -228,6 +228,10 @@
   .voice-interim { min-height:18px; margin-top:6px; font-size:.8rem; color:var(--text-dim); font-style:italic; }
   .voice-interim:empty { min-height:0; }
   .voice-edit-hint { font-size:.65rem; color:var(--text-dim); margin-top:4px; }
+  /* встроенная запись внутри окна блюда */
+  .voice-slot { margin-top:12px; border:1px solid var(--cyan); background:var(--bg2); padding:12px; animation:fadeUp .25s ease both; }
+  .voice-slot .overlay-title { margin-bottom:10px; }
+  .voice-slot .hint { display:none; }
   /* второстепенное действие: пунктирная рамка, приглушённый цвет, перенос текста разрешён */
   .btn-add { width:100%; margin-top:10px; padding:11px 12px; border:1px dashed var(--border); background:transparent;
              color:var(--text-dim); font-family:'Share Tech Mono',monospace; font-size:.7rem; letter-spacing:.08em;
@@ -555,27 +559,30 @@
   </div>
 </div>
 
-<!-- ГОЛОСОВОЙ ВВОД -->
+<!-- ГОЛОСОВОЙ ВВОД. Панель переезжает: отдельным окном с главной,
+     либо прямо внутрь окна блюда, чтобы окна не накладывались друг на друга -->
 <div class="overlay" id="voiceOverlay">
-  <div class="overlay-box" style="max-width:460px">
-    <div class="overlay-title"><span>// ГОВОРИТЕ</span><span class="overlay-close" onclick="cancelVoice()">✕ отмена</span></div>
+  <div class="overlay-box" id="voiceOverlayBox" style="max-width:460px">
+    <div id="voicePanel">
+      <div class="overlay-title"><span id="voiceTitle">// ГОВОРИТЕ</span><span class="overlay-close" onclick="cancelVoice()">✕ отмена</span></div>
 
-    <div class="voice-live" id="voiceListenRow">
-      <span class="voice-dot"></span>
-      <span>Записываю</span>
-      <span class="voice-timer" id="voiceTimer">0:00</span>
+      <div class="voice-live" id="voiceListenRow">
+        <span class="voice-dot"></span>
+        <span>Записываю</span>
+        <span class="voice-timer" id="voiceTimer">0:00</span>
+      </div>
+
+      <textarea class="voice-transcript" id="voiceTranscript" rows="4"
+                placeholder="…слушаю, говорите" oninput="onTranscriptEdit()"></textarea>
+      <div class="voice-interim" id="voiceInterim"></div>
+      <div class="voice-edit-hint">Текст можно исправить прямо здесь — сотрите лишнее или допишите</div>
+
+      <div class="voice-photos" id="voicePhotos"></div>
+      <button class="btn-add" onclick="addVoicePhoto()" id="voicePhotoBtn">📷 Добавить фото</button>
+
+      <div class="hint" style="margin-top:8px" id="voiceHint">Говорите свободно, можно с паузами. Фото упаковки помогает точнее посчитать — с него читается таблица пищевой ценности.</div>
+      <button class="btn primary" id="voiceDoneBtn" onclick="finishVoice()">ГОТОВО — РАСПОЗНАТЬ</button>
     </div>
-
-    <textarea class="voice-transcript" id="voiceTranscript" rows="4"
-              placeholder="…слушаю, говорите" oninput="onTranscriptEdit()"></textarea>
-    <div class="voice-interim" id="voiceInterim"></div>
-    <div class="voice-edit-hint">Текст можно исправить прямо здесь — сотрите лишнее или допишите</div>
-
-    <div class="voice-photos" id="voicePhotos"></div>
-    <button class="btn-add" onclick="addVoicePhoto()" id="voicePhotoBtn">📷 Добавить фото</button>
-
-    <div class="hint" style="margin-top:8px">Говорите свободно, можно с паузами. Фото упаковки помогает точнее посчитать — с него читается таблица пищевой ценности.</div>
-    <button class="btn primary" id="voiceDoneBtn" onclick="finishVoice()">ГОТОВО — РАСПОЗНАТЬ</button>
   </div>
 </div>
 
@@ -615,7 +622,10 @@
       <button class="icon-btn" id="dishVoiceBtn" title="Надиктовать состав" onclick="dishVoice()">🎤</button>
       <button class="btn small" onclick="dishParseText()">рассчитать</button>
     </div>
-    <div class="hint" style="margin-top:6px">Перечисли продукты и количество (вписав или надиктовав 🎤) — AI посчитает КБЖУ каждого и сложит. Потом поправь количество, если нужно.</div>
+    <div class="hint" style="margin-top:6px" id="dishHint">Перечисли продукты и количество (вписав или надиктовав 🎤) — AI посчитает КБЖУ каждого и сложит. Потом поправь количество, если нужно.</div>
+
+    <!-- сюда разворачивается запись голоса, чтобы не открывать окно поверх окна -->
+    <div class="voice-slot" id="dishVoiceSlot" style="display:none"></div>
 
     <div id="dishIngList" style="margin-top:10px"></div>
     <div class="dish-total" id="dishTotal"></div>
@@ -1031,7 +1041,11 @@ function openDishForm(id) {
   document.getElementById('dishOverlay').classList.add('show');
 }
 
-function closeDishForm() { document.getElementById('dishOverlay').classList.remove('show'); editingDishId = null; dishIngredients = []; }
+function closeDishForm() {
+  if (voice.active && voice.slot === 'dishVoiceSlot') cancelVoice();  // не оставляем запись включённой
+  document.getElementById('dishOverlay').classList.remove('show');
+  editingDishId = null; dishIngredients = [];
+}
 
 function clearDishForm() {
   editingDishId = null;
@@ -1109,6 +1123,7 @@ function dishParseText() {
 }
 
 function dishVoice() {
+  // разворачиваем запись внутри окна блюда, а не поверх него
   listenVoice('dishVoiceBtn', async (text, photos) => {
     toast((text ? 'Состав: «' + text + '»' : 'Разбираю фото') + ' — считаю…');
     const parts = buildFoodParts(text, photos);
@@ -1117,7 +1132,7 @@ function dishVoice() {
       + (photos && photos.length ? 'По фото уточни продукт и КБЖУ; если видна таблица пищевой ценности — бери числа оттуда. ' : '')
       + FOOD_LIST_JSON_SPEC;
     await recognizeFood(parts, addDishIngredients);
-  });
+  }, { slot:'dishVoiceSlot', title:'// СОСТАВ ГОЛОСОМ', doneLabel:'РАССЧИТАТЬ СОСТАВ' });
 }
 
 function saveDish() {
@@ -1797,7 +1812,7 @@ function fileToBase64(file) {
 // Окно с живым текстом и явной кнопкой «Готово». Safari на iPhone часто обрывает
 // распознавание сам и не всегда шлёт onend — поэтому здесь авто-перезапуск и
 // принудительное завершение по таймеру, чтобы кнопка не залипала.
-const voice = { rec:null, btnId:null, onDone:null, final:'', interim:'', active:false, stopping:false, tick:null, failsafe:null, startedAt:0, photos:[] };
+const voice = { rec:null, btnId:null, onDone:null, final:'', interim:'', active:false, stopping:false, tick:null, failsafe:null, startedAt:0, photos:[], slot:null };
 const MAX_VOICE_PHOTOS = 4;
 
 // Фото сжимаем перед отправкой: снимок с телефона — это 12 Мп, его долго грузить.
@@ -1850,8 +1865,27 @@ document.getElementById('voicePhotoInput').addEventListener('change', async (e) 
   renderVoicePhotos();
 });
 
+// Панель записи одна на всё приложение и переезжает туда, где нужна:
+// отдельным окном с главного экрана — или внутрь окна блюда, чтобы окна не накладывались.
 function voiceUI(show) {
-  document.getElementById('voiceOverlay').classList.toggle('show', show);
+  const panel = document.getElementById('voicePanel');
+  const slot = voice.slot && document.getElementById(voice.slot);
+  const overlay = document.getElementById('voiceOverlay');
+
+  if (show && slot) {
+    slot.appendChild(panel);
+    slot.style.display = 'block';
+    overlay.classList.remove('show');
+    slot.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  } else if (show) {
+    overlay.classList.add('show');
+  } else {
+    // возвращаем панель на место и прячем оба варианта
+    document.getElementById('voiceOverlayBox').appendChild(panel);
+    document.querySelectorAll('.voice-slot').forEach(s => { s.style.display = 'none'; });
+    overlay.classList.remove('show');
+  }
+
   const btn = voice.btnId && document.getElementById(voice.btnId);
   if (btn) btn.classList.toggle('listening', show);
 }
@@ -1884,11 +1918,15 @@ function renderTranscript() {
 
 function onTranscriptEdit() { renderTranscript(); }
 
-function listenVoice(btnId, onFinalText) {
+function listenVoice(btnId, onFinalText, opts) {
   if (voice.active) { finishVoice(); return; }       // повторное нажатие = закончить
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!state.settings.geminiKey) { toast('Добавьте Gemini-ключ в Настройках — без него КБЖУ не посчитается'); return; }
 
+  opts = opts || {};
+  voice.slot = opts.slot || null;
+  document.getElementById('voiceTitle').textContent = opts.title || '// ГОВОРИТЕ';
+  document.getElementById('voiceDoneBtn').textContent = opts.doneLabel || 'ГОТОВО — РАСПОЗНАТЬ';
   voice.btnId = btnId; voice.onDone = onFinalText;
   voice.final = ''; voice.interim = ''; voice.stopping = false; voice.startedAt = Date.now();
   voice.photos = [];
@@ -1968,7 +2006,7 @@ function cancelVoice() {
 function cleanupVoice() {
   clearInterval(voice.tick); clearTimeout(voice.failsafe);
   voice.rec = null; voice.active = false; voice.stopping = false;
-  voice.photos = []; voice.interim = '';
+  voice.photos = []; voice.interim = ''; voice.slot = null;
   const el = document.getElementById('voicePhotos'); if (el) el.innerHTML = '';
   const ta = document.getElementById('voiceTranscript'); if (ta) ta.value = '';
   const int = document.getElementById('voiceInterim'); if (int) int.textContent = '';
