@@ -220,6 +220,12 @@
   .voice-transcript i { color:var(--text-dim); font-style:normal; }
   .voice-transcript .vt-empty { color:var(--text-dim); }
   .voice-type-row { display:flex; gap:8px; margin-top:10px; }
+  .voice-photos { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .voice-photos:empty { display:none; }
+  .vp-item { position:relative; width:64px; height:64px; border:1px solid var(--border); overflow:hidden; }
+  .vp-item img { width:100%; height:100%; object-fit:cover; display:block; }
+  .vp-del { position:absolute; top:0; right:0; width:22px; height:22px; border:none; background:rgba(8,12,16,.85); color:var(--text-dim); cursor:pointer; font-size:.75rem; line-height:1; padding:0; }
+  .vp-del:hover { color:var(--magenta); }
   .scan-view { position:relative; line-height:0; }
   /* рамка прицела: показывает, куда наводить, чтобы штрихкод попал в кадр целиком */
   .scan-frame { position:absolute; left:8%; right:8%; top:28%; bottom:28%; pointer-events:none; }
@@ -545,11 +551,13 @@
     <div class="voice-transcript" id="voiceTranscript"></div>
 
     <div class="voice-type-row" id="voiceTypeRow" style="display:none">
-      <input class="inp" id="voiceTypeInput" placeholder="напишите, что съели" onkeydown="if(event.key==='Enter')submitTypedVoice()">
-      <button class="btn small" onclick="submitTypedVoice()">готово</button>
+      <input class="inp" id="voiceTypeInput" placeholder="напишите, что съели" onkeydown="if(event.key==='Enter')finishVoice()">
     </div>
 
-    <div class="hint" style="margin-top:8px">Говорите свободно, можно с паузами: «съела курицу, 100 грамм творога, морковку». Когда закончите — «Готово».</div>
+    <div class="voice-photos" id="voicePhotos"></div>
+    <button class="btn outline small" onclick="addVoicePhoto()" id="voicePhotoBtn" style="width:100%;margin-top:10px">📷 добавить фото — упаковку или блюдо</button>
+
+    <div class="hint" style="margin-top:8px">Говорите свободно, можно с паузами. Фото упаковки помогает точнее посчитать: с него читается состав и таблица пищевой ценности.</div>
     <button class="btn" id="voiceDoneBtn" onclick="finishVoice()" style="width:100%;margin-top:12px">ГОТОВО — РАСПОЗНАТЬ</button>
   </div>
 </div>
@@ -622,6 +630,7 @@
 
 <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none">
 <input type="file" id="barcodePhotoInput" accept="image/*" capture="environment" style="display:none">
+<input type="file" id="voicePhotoInput" accept="image/*" capture="environment" style="display:none">
 
 <script>
 // ───────────────────────── STATE ─────────────────────────
@@ -1068,9 +1077,14 @@ function dishParseText() {
 }
 
 function dishVoice() {
-  listenVoice('dishVoiceBtn', async (text) => {
-    toast('Состав: «' + text + '» — считаю…');
-    await recognizeFood([{ text: `Это состав одного блюда — список ингредиентов с количествами: "${text}". ` + FOOD_LIST_JSON_SPEC }], addDishIngredients);
+  listenVoice('dishVoiceBtn', async (text, photos) => {
+    toast((text ? 'Состав: «' + text + '»' : 'Разбираю фото') + ' — считаю…');
+    const parts = buildFoodParts(text, photos);
+    // тот же разбор, но результат идёт в состав блюда, а не в дневник
+    parts[0].text = (text ? `Это состав одного блюда — ингредиенты с количествами: "${text}". ` : 'На фото — ингредиенты или упаковка продукта для блюда. ')
+      + (photos && photos.length ? 'По фото уточни продукт и КБЖУ; если видна таблица пищевой ценности — бери числа оттуда. ' : '')
+      + FOOD_LIST_JSON_SPEC;
+    await recognizeFood(parts, addDishIngredients);
   });
 }
 
@@ -1751,7 +1765,59 @@ function fileToBase64(file) {
 // Окно с живым текстом и явной кнопкой «Готово». Safari на iPhone часто обрывает
 // распознавание сам и не всегда шлёт onend — поэтому здесь авто-перезапуск и
 // принудительное завершение по таймеру, чтобы кнопка не залипала.
-const voice = { rec:null, btnId:null, onDone:null, final:'', interim:'', active:false, stopping:false, tick:null, failsafe:null, startedAt:0 };
+const voice = { rec:null, btnId:null, onDone:null, final:'', interim:'', active:false, stopping:false, tick:null, failsafe:null, startedAt:0, photos:[] };
+const MAX_VOICE_PHOTOS = 4;
+
+// Фото сжимаем перед отправкой: снимок с телефона — это 12 Мп, его долго грузить.
+// 1280px хватает, чтобы Gemini прочитал таблицу пищевой ценности на упаковке.
+function fileToScaledImage(file, maxSide, quality) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * scale);
+      c.height = Math.round(img.naturalHeight * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      const dataUrl = c.toDataURL('image/jpeg', quality);
+      resolve({ mime: 'image/jpeg', base64: dataUrl.split(',')[1], preview: dataUrl });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('не удалось прочитать фото')); };
+    img.src = url;
+  });
+}
+
+function addVoicePhoto() { document.getElementById('voicePhotoInput').click(); }
+
+function renderVoicePhotos() {
+  const el = document.getElementById('voicePhotos');
+  if (!el) return;
+  el.innerHTML = voice.photos.map((p, i) =>
+    `<div class="vp-item"><img src="${p.preview}" alt=""><button class="vp-del" onclick="removeVoicePhoto(${i})" title="убрать">✕</button></div>`
+  ).join('');
+  const btn = document.getElementById('voicePhotoBtn');
+  if (btn) {
+    btn.disabled = voice.photos.length >= MAX_VOICE_PHOTOS;
+    btn.textContent = voice.photos.length ? `📷 добавить ещё фото (${voice.photos.length})`
+                                          : '📷 добавить фото — упаковку или блюдо';
+  }
+  renderTranscript();
+}
+
+function removeVoicePhoto(i) { voice.photos.splice(i, 1); renderVoicePhotos(); }
+
+document.getElementById('voicePhotoInput').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  for (const f of files) {
+    if (voice.photos.length >= MAX_VOICE_PHOTOS) break;
+    try { voice.photos.push(await fileToScaledImage(f, 1280, 0.85)); }
+    catch (err) { toast('Не удалось добавить фото: ' + err.message); }
+  }
+  renderVoicePhotos();
+});
 
 function voiceUI(show) {
   document.getElementById('voiceOverlay').classList.toggle('show', show);
@@ -1764,10 +1830,12 @@ function renderTranscript() {
   if (!el) return;
   const txt = (voice.final + voice.interim).trim();
   el.innerHTML = txt ? escAttr(voice.final) + '<i>' + escAttr(voice.interim) + '</i>'
-                     : '<span class="vt-empty">…слушаю, говорите</span>';
+                     : '<span class="vt-empty">' + (voice.photos.length ? 'можно ничего не говорить — разберу по фото' : '…слушаю, говорите') + '</span>';
   el.scrollTop = el.scrollHeight;
+  // «Готово» доступно, если есть речь ИЛИ хотя бы одно фото
   const ok = document.getElementById('voiceDoneBtn');
-  if (ok) ok.disabled = !txt;
+  const typed = (document.getElementById('voiceTypeInput') || {}).value || '';
+  if (ok) ok.disabled = !txt && !voice.photos.length && !typed.trim();
 }
 
 function listenVoice(btnId, onFinalText) {
@@ -1777,9 +1845,10 @@ function listenVoice(btnId, onFinalText) {
 
   voice.btnId = btnId; voice.onDone = onFinalText;
   voice.final = ''; voice.interim = ''; voice.stopping = false; voice.startedAt = Date.now();
+  voice.photos = [];
   voice.active = true;
   voiceUI(true);
-  renderTranscript();
+  renderVoicePhotos();
 
   // нет распознавания речи (например, старый Safari) — даём набрать текстом
   document.getElementById('voiceTypeRow').style.display = SR ? 'none' : 'flex';
@@ -1836,7 +1905,8 @@ function startRecognition(SR) {
 function finishVoice() {
   if (!voice.active || voice.stopping) return;
   voice.stopping = true;
-  try { voice.rec && voice.rec.stop(); } catch(e) {}
+  if (!voice.rec) { completeVoice(); return; }   // распознавания речи нет — только текст и фото
+  try { voice.rec.stop(); } catch(e) {}
   // подстраховка: если onend не придёт (бывает на iPhone) — завершаем сами
   clearTimeout(voice.failsafe);
   voice.failsafe = setTimeout(() => { try { voice.rec && voice.rec.abort(); } catch(e){} completeVoice(); }, 1200);
@@ -1851,34 +1921,49 @@ function cancelVoice() {
 function cleanupVoice() {
   clearInterval(voice.tick); clearTimeout(voice.failsafe);
   voice.rec = null; voice.active = false; voice.stopping = false;
+  voice.photos = [];
+  const el = document.getElementById('voicePhotos'); if (el) el.innerHTML = '';
   voiceUI(false);
 }
 
 async function completeVoice() {
   if (!voice.active && !voice.stopping) return;
-  const text = (voice.final + ' ' + voice.interim).trim();
+  const typed = (document.getElementById('voiceTypeInput') || {}).value || '';
+  const text = ((voice.final + ' ' + voice.interim).trim() || typed.trim());
+  const photos = voice.photos.slice();
   const done = voice.onDone;
+  const typeInput = document.getElementById('voiceTypeInput');
+  if (typeInput) typeInput.value = '';
   cleanupVoice();
-  if (!text) { toast('Не расслышал — попробуйте ещё раз'); return; }
-  if (done) await done(text);
+  if (!text && !photos.length) { toast('Не расслышал — попробуйте ещё раз'); return; }
+  if (done) await done(text, photos);
 }
 
-// ручной ввод, если распознавание речи недоступно
-async function submitTypedVoice() {
-  const val = document.getElementById('voiceTypeInput').value.trim();
-  if (!val) return;
-  const done = voice.onDone;
-  document.getElementById('voiceTypeInput').value = '';
-  cleanupVoice();
-  if (done) await done(val);
+// Речь и фото уходят в Gemini ОДНИМ запросом — он разбирает их вместе:
+// по фото уточняет продукт и КБЖУ (в т.ч. читает таблицу на упаковке), из речи берёт количество.
+function buildFoodParts(text, photos) {
+  const has = photos && photos.length;
+  let prompt;
+  if (text && has) {
+    prompt = `Пользователь надиктовал, что он съел: "${text}". Также приложены фото (упаковка продукта или само блюдо). `
+           + `Используй фото, чтобы точно определить продукт и его КБЖУ: если на упаковке видна таблица пищевой ценности — бери числа ОТТУДА и пересчитай на съеденное количество. `
+           + `Количество бери из речи, если оно названо; иначе оцени по фото. ` + FOOD_LIST_JSON_SPEC;
+  } else if (has) {
+    prompt = `На фото — еда или упаковка продукта. Определи всё, что съедено. `
+           + `Если видна таблица пищевой ценности — бери числа оттуда и пересчитай на порцию. ` + FOOD_LIST_JSON_SPEC;
+  } else {
+    prompt = `Пользователь надиктовал обычной речью, что он съел: "${text}". ` + FOOD_LIST_JSON_SPEC;
+  }
+  const parts = [{ text: prompt }];
+  (photos || []).forEach(p => parts.push({ inline_data: { mime_type: p.mime, data: p.base64 } }));
+  return parts;
 }
 
 function startVoice() {
-  listenVoice('voiceBtn', async (text) => {
-    toast('Распознал: «' + text + '» — анализирую…');
-    await recognizeFood([
-      { text: `Пользователь надиктовал обычной речью, что он съел: "${text}". ` + FOOD_LIST_JSON_SPEC }
-    ]);
+  listenVoice('voiceBtn', async (text, photos) => {
+    const note = text ? 'Распознал: «' + text + '»' : 'Разбираю фото';
+    toast(note + (photos.length ? ` + фото: ${photos.length}` : '') + ' — анализирую…');
+    await recognizeFood(buildFoodParts(text, photos));
   });
 }
 
