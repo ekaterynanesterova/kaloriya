@@ -211,11 +211,8 @@
   .overlay-title { font-size:.65rem; letter-spacing:.18em; text-transform:uppercase; color:var(--cyan); text-shadow:0 0 8px rgba(0,255,224,.4); margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
   .overlay-close { cursor:pointer; color:var(--text-dim); font-size:1rem; }
   .overlay-close:hover { color:var(--magenta); }
-  #scannerVideo { width:100%; background:#000; border:1px solid var(--border); }
   .scan-status { font-size:.68rem; color:var(--text-dim); margin-top:10px; text-align:center; }
   .manual-barcode-row { display:none; gap:8px; margin-top:12px; }
-  .scan-actions { display:flex; gap:8px; margin-top:10px; }
-  .scan-actions .btn { flex:1; }
   /* окно голосового ввода */
   .voice-live { display:flex; align-items:center; gap:10px; font-size:.7rem; letter-spacing:.14em; text-transform:uppercase; color:var(--magenta); margin-bottom:10px; }
   .voice-dot { width:11px; height:11px; min-width:11px; border-radius:50%; background:var(--magenta); box-shadow:0 0 10px var(--magenta); animation:pulse 1s infinite; }
@@ -235,6 +232,8 @@
   .portion-btn { flex:1; font-family:'Share Tech Mono',monospace; font-size:.82rem; padding:10px 6px; border:1px solid var(--border); background:var(--bg2); color:var(--text); cursor:pointer; transition:all .15s; }
   .portion-btn:hover { border-color:var(--cyan); color:var(--cyan); background:var(--cyan-dim); }
   .portion-unit { font-size:.72rem; color:var(--text-dim); }
+  .manual-link { font-size:.66rem; color:var(--text-dim); cursor:pointer; text-decoration:underline dotted; white-space:nowrap; }
+  .manual-link:hover { color:var(--cyan); }
   /* встроенная запись внутри окна блюда */
   .voice-slot { margin-top:12px; border:1px solid var(--cyan); background:var(--bg2); padding:12px; animation:fadeUp .25s ease both; }
   .voice-slot .overlay-title { margin-bottom:10px; }
@@ -256,14 +255,6 @@
   .vp-item img { width:100%; height:100%; object-fit:cover; display:block; }
   .vp-del { position:absolute; top:0; right:0; width:22px; height:22px; border:none; background:rgba(8,12,16,.85); color:var(--text-dim); cursor:pointer; font-size:.75rem; line-height:1; padding:0; }
   .vp-del:hover { color:var(--magenta); }
-  .scan-view { position:relative; line-height:0; }
-  /* рамка прицела: показывает, куда наводить, чтобы штрихкод попал в кадр целиком */
-  .scan-frame { position:absolute; left:8%; right:8%; top:28%; bottom:28%; pointer-events:none; }
-  .scan-frame span { position:absolute; width:26px; height:26px; border:2px solid var(--cyan); box-shadow:0 0 10px rgba(0,255,224,.5); }
-  .scan-frame span:nth-child(1) { top:0; left:0; border-right:none; border-bottom:none; }
-  .scan-frame span:nth-child(2) { top:0; right:0; border-left:none; border-bottom:none; }
-  .scan-frame span:nth-child(3) { bottom:0; left:0; border-right:none; border-top:none; }
-  .scan-frame span:nth-child(4) { bottom:0; right:0; border-left:none; border-top:none; }
 
   /* REVIEW SHEET */
   .review-meal-row { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
@@ -392,9 +383,8 @@
     <div class="meal-bar" id="mealBar"></div>
 
     <div class="input-row" style="margin-top:16px">
-      <input class="inp" id="foodName" list="productNames" placeholder="название продукта или штрихкод" oninput="onNameInput()" style="min-width:160px">
+      <input class="inp" id="foodName" list="productNames" placeholder="название продукта" oninput="onNameInput()" style="min-width:160px">
       <datalist id="productNames"></datalist>
-      <button class="icon-btn" title="Сканировать штрихкод" onclick="openScanner()">▤</button>
       <button class="icon-btn" title="Распознать по фото (Gemini)" onclick="openPhotoCapture()">📷</button>
       <button class="icon-btn" id="voiceBtn" title="Надиктовать (Gemini)" onclick="startVoice()">🎤</button>
     </div>
@@ -410,14 +400,7 @@
 
     <div class="preview-row" id="previewRow">
       <span><span class="pv-kcal" id="pvKcal">0</span> ккал · Б <span id="pvProt">0</span>г Ж <span id="pvFat">0</span>г У <span id="pvCarb">0</span>г <span class="auto-badge" id="autoBadge" style="display:none">авто</span></span>
-      <button class="btn outline small" onclick="toggleManual()">+ вручную</button>
-    </div>
-
-    <div class="manual-grid" id="manualGrid" style="display:none">
-      <div><label>Ккал</label><input class="inp" id="manKcal" type="number" oninput="onManualEdit()"></div>
-      <div><label>Белки г</label><input class="inp" id="manProt" type="number" oninput="onManualEdit()"></div>
-      <div><label>Жиры г</label><input class="inp" id="manFat" type="number" oninput="onManualEdit()"></div>
-      <div><label>Углев г</label><input class="inp" id="manCarb" type="number" oninput="onManualEdit()"></div>
+      <span class="manual-link" onclick="openManual()">указать КБЖУ вручную</span>
     </div>
 
     <div class="input-row" style="margin-top:12px">
@@ -532,24 +515,6 @@
 <div class="toast" id="toast"></div>
 <div class="busy-pill" id="busyPill"><span class="busy-spinner"></span><span id="busyText">Анализирую…</span></div>
 
-<!-- BARCODE SCANNER OVERLAY -->
-<div class="overlay" id="scannerOverlay">
-  <div class="overlay-box">
-    <div class="overlay-title"><span>// СКАНЕР ШТРИХКОДА</span><span class="overlay-close" onclick="closeScanner()">✕ закрыть</span></div>
-    <div class="scan-view">
-      <video id="scannerVideo" autoplay playsinline muted></video>
-      <div class="scan-frame" id="scanFrame" style="display:none"><span></span><span></span><span></span><span></span></div>
-    </div>
-    <div class="scan-status" id="scanStatus">Наведите камеру на штрихкод...</div>
-    <div class="scan-actions">
-      <button class="btn outline small" onclick="openBarcodePhoto()" id="barcodePhotoBtn">не читается — сфотографировать</button>
-    </div>
-    <div class="manual-barcode-row" id="manualBarcodeRow">
-      <input class="inp" id="manualBarcodeInput" inputmode="numeric" pattern="[0-9]*" placeholder="или впишите номер под штрихкодом" onkeydown="if(event.key==='Enter')lookupBarcode(this.value)">
-      <button class="btn small" onclick="lookupBarcode(document.getElementById('manualBarcodeInput').value)">найти</button>
-    </div>
-  </div>
-</div>
 
 <!-- REVIEW / ПОДТВЕРЖДЕНИЕ РАСПОЗНАННОГО -->
 <div class="overlay" id="reviewOverlay">
@@ -563,6 +528,21 @@
     <div id="reviewList"></div>
     <button class="btn" onclick="confirmReview()" style="width:100%;margin-top:14px">+ ДОБАВИТЬ ВСЁ (<span id="reviewCount">0</span>)</button>
     <div class="hint" style="margin-top:8px">≈ оценка — порцию прикинул AI, проверьте количество. Меняешь количество — КБЖУ пересчитывается автоматически. Лишнее убери крестиком.</div>
+  </div>
+</div>
+
+<!-- РУЧНОЙ ВВОД КБЖУ — редкий случай, поэтому вынесен с главной в отдельное окно -->
+<div class="overlay" id="manualOverlay">
+  <div class="overlay-box" style="max-width:420px">
+    <div class="overlay-title"><span>// КБЖУ ВРУЧНУЮ</span><span class="overlay-close" onclick="closeManual()">✕ отмена</span></div>
+    <div class="hint" style="margin-bottom:10px">Для случая, когда состав известен с упаковки, а распознавать нечего. Значения — на всю порцию, которую вписали в форме.</div>
+    <div class="manual-grid">
+      <div><label>Ккал</label><input class="inp" id="manKcal" type="number" min="0" oninput="onManualEdit()"></div>
+      <div><label>Белки г</label><input class="inp" id="manProt" type="number" min="0" oninput="onManualEdit()"></div>
+      <div><label>Жиры г</label><input class="inp" id="manFat" type="number" min="0" oninput="onManualEdit()"></div>
+      <div><label>Углев г</label><input class="inp" id="manCarb" type="number" min="0" oninput="onManualEdit()"></div>
+    </div>
+    <button class="btn primary" onclick="applyManual()">ПРИМЕНИТЬ</button>
   </div>
 </div>
 
@@ -685,7 +665,6 @@
 </div>
 
 <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none">
-<input type="file" id="barcodePhotoInput" accept="image/*" capture="environment" style="display:none">
 <input type="file" id="voicePhotoInput" accept="image/*" capture="environment" style="display:none">
 
 <script>
@@ -703,7 +682,6 @@ let state = {
   weights: [],
   goals: { kcal:2000, weight:null, height:null, age:null, gender:'', activity:1.55 },
   products: {},  // normalizedName -> {name,unit,per1:{kcal,prot,fat,carb},usageCount,lastAmount,lastUsed}
-  barcodeCache: {}, // code -> {name,unit,per1}
   dishes: [],    // готовые блюда: [{id,name,amount,unit,kcal,prot,fat,carb}]
   settings: { geminiKey:'', geminiModel:'gemini-2.5-flash' }
 };
@@ -812,7 +790,6 @@ function ensureDefaults() {
   if (!state.entries) state.entries = {};
   if (!state.weights) state.weights = [];
   if (!state.goals) state.goals = { kcal:2000, weight:null, height:null, age:null, gender:'', activity:1.55 };
-  if (!state.barcodeCache) state.barcodeCache = {};
   if (!state.dishes) state.dishes = [];
   if (!state.settings) state.settings = { geminiKey:'', geminiModel:'gemini-2.5-flash' };
   if (!state.settings.geminiModel) state.settings.geminiModel = 'gemini-2.5-flash';
@@ -1047,24 +1024,13 @@ function renderQuickFoods() {
   const top = topProducts(10);
   document.getElementById('quickFoods').innerHTML = top.map(p => {
     const kcal = Math.round(p.per1.kcal * p.lastAmount);
-    // имя приходит из внешней базы штрихкодов и от AI — экранируем, иначе в страницу
+    // имя приходит от AI — экранируем, иначе в страницу
     // попадёт чужой HTML; ключ кладём в data-атрибут, чтобы апостроф не ломал кнопку
     return `<button class="quick-chip" data-key="${escAttr(normKey(p.name))}" onclick="quickAdd(this.dataset.key)">${escAttr(p.name)} ${p.lastAmount}${UNIT_LABEL[p.unit]} · <b>${kcal}</b></button>`;
   }).join('');
 }
 
 
-function quickAdd(key) {
-  const p = state.products[key];
-  if (!p) return;
-  pushEntry({
-    name: p.name, meal: currentMeal, amount: p.lastAmount, unit: p.unit,
-    kcal: Math.round(p.per1.kcal*p.lastAmount), prot: round1(p.per1.prot*p.lastAmount),
-    fat: round1(p.per1.fat*p.lastAmount), carb: round1(p.per1.carb*p.lastAmount), source:'quick'
-  });
-  upsertProduct(p.name, p.unit, p.per1, p.lastAmount);
-  toast(`${p.name} +${Math.round(p.per1.kcal*p.lastAmount)} ккал`);
-}
 
 // ───────────────────────── МОИ БЛЮДА (готовые порции) ─────────────────────────
 function renderDishes() {
@@ -1092,34 +1058,55 @@ function dishWeight(d) {
   return w > 0 ? Math.round(w) : null;
 }
 
-let portionDish = null;
+// Одно окно выбора количества и для блюд, и для продуктов из «быстрого добавления»:
+// ничего не попадает в дневник, пока не подтвердишь, сколько именно съедено.
+let portionCtx = null;   // { name, unit, per1, usual, source, totalNote }
 
-// Блюдо больше не падает в дневник целиком — сначала уточняем, сколько съедено
-function addDish(id) {
-  const d = state.dishes.find(x => x.id === id);
-  if (!d) return;
-  portionDish = d;
-  const w = dishWeight(d);
-
-  document.getElementById('portionTitle').textContent = '// ' + d.name.toUpperCase();
-  document.getElementById('portionInfo').innerHTML = w
-    ? `Всё блюдо: <b>${w} г</b> · ${d.kcal} ккал`
-    : `Всё блюдо: <b>${d.kcal}</b> ккал`;
-
-  const amt = document.getElementById('portionAmount');
-  amt.value = w || 1;
-  document.getElementById('portionUnit').textContent = w ? 'г' : 'порций';
-
+function openPortion(ctx) {
+  portionCtx = ctx;
+  document.getElementById('portionTitle').textContent = '// ' + ctx.name.toUpperCase();
+  document.getElementById('portionInfo').innerHTML = ctx.totalNote;
+  document.getElementById('portionAmount').value = ctx.usual;
+  document.getElementById('portionUnit').textContent = UNIT_LABEL[ctx.unit] || ctx.unit;
   document.getElementById('portionMeal').innerHTML =
     MEALS.map(m => `<option value="${m.key}" ${m.key===currentMeal?'selected':''}>${m.icon} ${m.label}</option>`).join('');
 
-  const quick = w ? [['¼', w/4], ['½', w/2], ['¾', w*0.75], ['всё', w]]
-                  : [['¼', 0.25], ['½', 0.5], ['1', 1], ['2', 2]];
+  const u = ctx.usual || 1;
+  const round = (v) => Math.round(v*100)/100;
+  // для блюда доли считаем от всей порции, для продукта — от привычного количества
+  const quick = ctx.kind === 'dish'
+    ? [['¼', u/4], ['½', u/2], ['¾', u*0.75], ['всё', u]]
+    : (ctx.unit === 'pcs' ? [['½', 0.5], ['1', 1], ['2', 2], ['3', 3]]
+                          : [['½', u/2], ['×1', u], ['×1½', u*1.5], ['×2', u*2]]);
   document.getElementById('portionQuick').innerHTML = quick
-    .map(([label, val]) => `<button class="portion-btn" onclick="setPortion(${Math.round(val*100)/100})">${label}</button>`).join('');
+    .map(([label, val]) => `<button class="portion-btn" onclick="setPortion(${round(val)})">${label}</button>`).join('');
 
   updatePortionPreview();
   document.getElementById('portionOverlay').classList.add('show');
+}
+
+// Блюдо: приводим к «на единицу», дальше логика общая
+function addDish(id) {
+  const d = state.dishes.find(x => x.id === id);
+  if (!d) return;
+  const w = dishWeight(d);
+  const base = w || 1;
+  openPortion({
+    kind: 'dish', name: d.name, unit: w ? 'g' : 'pcs', usual: base, source: 'dish',
+    per1: { kcal:(d.kcal||0)/base, prot:(d.prot||0)/base, fat:(d.fat||0)/base, carb:(d.carb||0)/base },
+    totalNote: w ? `Всё блюдо: <b>${w} г</b> · ${d.kcal} ккал` : `Всё блюдо: <b>${d.kcal}</b> ккал`
+  });
+}
+
+// Продукт из «быстрого добавления»
+function quickAdd(key) {
+  const p = state.products[key];
+  if (!p) return;
+  const usual = p.lastAmount || 100;
+  openPortion({
+    kind: 'product', name: p.name, unit: p.unit || 'g', usual, source: 'quick', per1: p.per1,
+    totalNote: `Обычно: <b>${usual} ${UNIT_LABEL[p.unit]||''}</b> · ${Math.round((p.per1.kcal||0)*usual)} ккал`
+  });
 }
 
 function setPortion(v) {
@@ -1127,47 +1114,37 @@ function setPortion(v) {
   updatePortionPreview();
 }
 
-// доля блюда: по весу или по количеству порций
-function portionFactor() {
-  const v = parseFloat(document.getElementById('portionAmount').value) || 0;
-  const w = dishWeight(portionDish);
-  return w ? v / w : v;
-}
+function portionAmount() { return parseFloat(document.getElementById('portionAmount').value) || 0; }
 
 function updatePortionPreview() {
-  const d = portionDish; if (!d) return;
-  const f = portionFactor();
-  document.getElementById('portionKcal').textContent = Math.round((d.kcal||0) * f);
-  document.getElementById('portionProt').textContent = round1((d.prot||0) * f);
-  document.getElementById('portionFat').textContent  = round1((d.fat||0) * f);
-  document.getElementById('portionCarb').textContent = round1((d.carb||0) * f);
+  const c = portionCtx; if (!c) return;
+  const a = portionAmount();
+  document.getElementById('portionKcal').textContent = Math.round((c.per1.kcal||0) * a);
+  document.getElementById('portionProt').textContent = round1((c.per1.prot||0) * a);
+  document.getElementById('portionFat').textContent  = round1((c.per1.fat||0)  * a);
+  document.getElementById('portionCarb').textContent = round1((c.per1.carb||0) * a);
   const btn = document.getElementById('portionAddBtn');
-  if (btn) btn.disabled = !(f > 0);
+  if (btn) btn.disabled = !(a > 0);
 }
 
-function closePortion() { document.getElementById('portionOverlay').classList.remove('show'); portionDish = null; }
+function closePortion() { document.getElementById('portionOverlay').classList.remove('show'); portionCtx = null; }
 
 function confirmPortion() {
-  const d = portionDish; if (!d) return;
-  const f = portionFactor();
-  if (!(f > 0)) return;
-  const w = dishWeight(d);
-  const amount = parseFloat(document.getElementById('portionAmount').value) || 0;
+  const c = portionCtx; if (!c) return;
+  const amount = portionAmount();
+  if (!(amount > 0)) return;
   const meal = document.getElementById('portionMeal').value || currentMeal;
-  const kcal = Math.round((d.kcal||0) * f);
+  const kcal = Math.round((c.per1.kcal||0) * amount);
 
   pushEntry({
-    name: d.name, meal, amount, unit: w ? 'g' : 'pcs',
-    kcal, prot: round1((d.prot||0)*f), fat: round1((d.fat||0)*f), carb: round1((d.carb||0)*f),
-    source: 'dish'
+    name: c.name, meal, amount, unit: c.unit,
+    kcal, prot: round1((c.per1.prot||0)*amount), fat: round1((c.per1.fat||0)*amount), carb: round1((c.per1.carb||0)*amount),
+    source: c.source
   });
-  // запоминаем как продукт, чтобы блюдо попадало и в быстрое добавление
-  if (amount > 0) {
-    upsertProduct(d.name, w ? 'g' : 'pcs',
-      { kcal:(d.kcal||0)/(w||1), prot:(d.prot||0)/(w||1), fat:(d.fat||0)/(w||1), carb:(d.carb||0)/(w||1) }, amount);
-  }
+  // запоминаем количество — в следующий раз оно предложится по умолчанию
+  upsertProduct(c.name, c.unit, c.per1, amount);
   closePortion();
-  toast(`${d.name} · ${amount}${w ? ' г' : ' порц.'} → ${kcal} ккал`);
+  toast(`${c.name} · ${amount} ${UNIT_LABEL[c.unit]||''} → ${kcal} ккал`);
 }
 
 let editingDishId = null;
@@ -1348,7 +1325,6 @@ function onNameInput() {
     document.getElementById('foodAmount').value = p.lastAmount;
     document.getElementById('foodUnit').value = p.unit;
     manualMode = false;
-    document.getElementById('manualGrid').style.display = 'none';
   } else {
     activeAuto = { per1:null, source:null };
   }
@@ -1395,19 +1371,25 @@ function setPreview(k,p,f,c) {
   document.getElementById('pvCarb').textContent = c;
 }
 
-function toggleManual() {
-  manualMode = !manualMode;
-  const grid = document.getElementById('manualGrid');
-  grid.style.display = manualMode ? 'grid' : 'none';
-  if (manualMode) {
-    document.getElementById('manKcal').value = document.getElementById('pvKcal').textContent;
-    document.getElementById('manProt').value = document.getElementById('pvProt').textContent;
-    document.getElementById('manFat').value  = document.getElementById('pvFat').textContent;
-    document.getElementById('manCarb').value = document.getElementById('pvCarb').textContent;
-    document.getElementById('autoBadge').style.display = 'none';
-  } else {
-    updatePreview();
-  }
+function openManual() {
+  // подставляем то, что уже посчитано, чтобы правку было от чего начать
+  document.getElementById('manKcal').value = document.getElementById('pvKcal').textContent;
+  document.getElementById('manProt').value = document.getElementById('pvProt').textContent;
+  document.getElementById('manFat').value  = document.getElementById('pvFat').textContent;
+  document.getElementById('manCarb').value = document.getElementById('pvCarb').textContent;
+  document.getElementById('manualOverlay').classList.add('show');
+}
+
+function closeManual() { document.getElementById('manualOverlay').classList.remove('show'); }
+
+function applyManual() {
+  const k = parseFloat(document.getElementById('manKcal').value) || 0;
+  if (!k) { toast('Укажите хотя бы калории'); return; }
+  manualMode = true;
+  document.getElementById('autoBadge').style.display = 'none';
+  onManualEdit();
+  closeManual();
+  toast('КБЖУ задано вручную — жмите «Добавить»');
 }
 
 function onManualEdit() {
@@ -1427,7 +1409,6 @@ function fillFormFromAuto(result, source) {
   const amount = result.amount || 1;
   activeAuto = { per1: { kcal:(result.kcal||0)/amount, prot:(result.prot||0)/amount, fat:(result.fat||0)/amount, carb:(result.carb||0)/amount }, source };
   manualMode = false;
-  document.getElementById('manualGrid').style.display = 'none';
   updatePreview();
 }
 
@@ -1461,7 +1442,8 @@ function addFood() {
     fat  = round1(activeAuto.per1.fat*amount);
     carb = round1(activeAuto.per1.carb*amount);
   } else {
-    toast('ERROR: нет данных КБЖУ — отсканируйте штрихкод, сфотографируйте, надиктуйте или впишите вручную (+)');
+    toast('Нет данных КБЖУ — сфотографируйте, надиктуйте или укажите вручную');
+    openManual();
     return;
   }
 
@@ -1481,7 +1463,6 @@ function resetForm() {
   document.getElementById('foodUnit').value = 'g';
   activeAuto = { per1:null, source:null };
   manualMode = false;
-  document.getElementById('manualGrid').style.display = 'none';
   ['manKcal','manProt','manFat','manCarb'].forEach(id => document.getElementById(id).value='');
   setPreview(0,0,0,0);
   document.getElementById('autoBadge').style.display = 'none';
@@ -1558,274 +1539,6 @@ function saveEditEntry() {
   toast('Запись обновлена');
 }
 
-// ───────────────────────── BARCODE SCANNER ─────────────────────────
-const ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/zxing-browser.min.js';
-let zxingControls = null;
-
-function loadScript(src) {
-  return new Promise((res, rej) => {
-    if (document.querySelector('script[data-src="'+src+'"]')) return res();
-    const s = document.createElement('script');
-    s.src = src; s.dataset.src = src;
-    s.onload = () => res();
-    s.onerror = () => rej(new Error('нет соединения'));
-    document.head.appendChild(s);
-  });
-}
-
-let scanEngine = '';        // какой движок сейчас читает
-let zxingStarted = false;   // запасной уже запущен
-let scanWatchdog = null;
-let scanHintTimer = null;
-
-function scanStatus(msg) { const el = document.getElementById('scanStatus'); if (el) el.textContent = msg; }
-
-async function openScanner() {
-  document.getElementById('scannerOverlay').classList.add('show');
-  document.getElementById('manualBarcodeRow').style.display = 'flex'; // ручной ввод доступен всегда
-  scanStatus('Запрашиваю доступ к камере…');
-  scannerActive = true;
-  scanEngine = ''; zxingStarted = false;
-  const video = document.getElementById('scannerVideo');
-  video.setAttribute('playsinline', '');
-  video.setAttribute('muted', '');
-
-  // штрихкод читается плохо на низком разрешении и без автофокуса — просим максимум
-  const tryGet = async (c) => navigator.mediaDevices.getUserMedia(c);
-  let stream = null;
-  try {
-    stream = await tryGet({ video: { facingMode:{ ideal:'environment' }, width:{ ideal:1920 }, height:{ ideal:1080 } } });
-  } catch(e) {
-    try { stream = await tryGet({ video: { facingMode:{ ideal:'environment' } } }); }
-    catch(e2) {
-      try { stream = await tryGet({ video: true }); }
-      catch(e3) { scanStatus('Нет доступа к камере: ' + e3.message + '. Введите номер вручную ↓'); return; }
-    }
-  }
-  scannerStream = stream;
-  video.srcObject = stream;
-  try { await video.play(); } catch(e) {}
-
-  // непрерывный автофокус, если камера умеет
-  try {
-    const track = stream.getVideoTracks()[0];
-    const caps = track.getCapabilities ? track.getCapabilities() : {};
-    if (caps.focusMode && caps.focusMode.includes('continuous')) {
-      await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
-    }
-  } catch(e) {}
-
-  // ждём, пока пойдут кадры — иначе распознавать нечего
-  for (let i = 0; i < 40 && scannerActive && !video.videoWidth; i++) await new Promise(r => setTimeout(r, 50));
-  if (!scannerActive) return;
-
-  scanStatus('Наведите штрихкод в рамку');
-  document.getElementById('scanFrame').style.display = 'block';
-  // если за 8 секунд ничего не поймалось — подсказываем запасной путь, но не мешаем читать
-  clearTimeout(scanHintTimer);
-  scanHintTimer = setTimeout(() => {
-    if (scannerActive) scanStatus('Не ловится? Поднесите ближе, чтобы полосы заняли рамку по ширине');
-  }, 8000);
-
-  // 1) встроенный детектор (Chrome/Android) — быстрый, но иногда молча не работает
-  let nativeOk = false;
-  if ('BarcodeDetector' in window) {
-    try {
-      const supported = await window.BarcodeDetector.getSupportedFormats();
-      const formats = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'].filter(f => supported.includes(f));
-      if (formats.length) {
-        scanEngine = 'native';
-        nativeScanLoop(video, new window.BarcodeDetector({ formats }));
-        nativeOk = true;
-      }
-    } catch(e) {}
-  }
-
-  // 2) если встроенного нет — сразу запасной; если есть — подстрахуемся через 2.5 с
-  if (!nativeOk) {
-    startZxing(video);
-  } else {
-    clearTimeout(scanWatchdog);
-    scanWatchdog = setTimeout(() => { if (scannerActive) startZxing(video, true); }, 2500);
-  }
-}
-
-// запасной движок: работает везде (iPhone/Safari и там, где встроенный подводит)
-async function startZxing(video, asBackup) {
-  if (zxingStarted || !scannerActive) return;
-  zxingStarted = true;
-  if (!asBackup) scanStatus('Загружаю сканер…');
-  try {
-    await loadScript(ZXING_URL);
-    const NS = window.ZXingBrowser;
-    if (!NS || !NS.BrowserMultiFormatReader) throw new Error('сканер не загрузился');
-    if (!scannerActive) return;
-    const reader = new NS.BrowserMultiFormatReader();
-    scanEngine = asBackup ? 'native+zxing' : 'zxing';
-    const onResult = (result) => { if (result && scannerActive) onBarcodeDetected(result.getText()); };
-    // decodeFromStream сам корректно цепляет поток к видео (playsinline/muted/play) —
-    // на Safari это работает надёжнее, чем ручная привязка
-    if (scannerStream && reader.decodeFromStream) {
-      zxingControls = await reader.decodeFromStream(scannerStream, video, onResult);
-    } else {
-      zxingControls = await reader.decodeFromVideoElement(video, onResult);
-    }
-    startFrameFallback();
-    if (scannerActive) scanStatus('Наведите штрихкод в рамку');
-  } catch(e) {
-    zxingStarted = false;
-    if (!asBackup) scanStatus('Сканер недоступен (' + e.message + '). Введите номер вручную ↓');
-  }
-}
-
-function nativeScanLoop(video, detector, errors) {
-  if (!scannerActive) return;
-  errors = errors || 0;
-  detector.detect(video).then(codes => {
-    if (codes && codes.length) { onBarcodeDetected(codes[0].rawValue); return; }
-    requestAnimationFrame(() => nativeScanLoop(video, detector, 0));
-  }).catch(() => {
-    // встроенный детектор ломается молча — после нескольких ошибок отдаём работу запасному
-    if (errors >= 3) { startZxing(video, true); return; }
-    setTimeout(() => nativeScanLoop(video, detector, errors + 1), 200);
-  });
-}
-
-// ── Штрихкод с фотографии: на iPhone это самый надёжный путь ──
-// Safari не умеет живое распознавание стабильно, зато родная камера даёт резкий снимок с автофокусом.
-const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
-              (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-// живой поток НЕ останавливаем — иначе после возврата из камеры остаётся чёрный экран
-function openBarcodePhoto() { document.getElementById('barcodePhotoInput').click(); }
-
-// iOS иногда «замораживает» видео после возврата из родной камеры — оживляем превью
-async function revivePreview() {
-  if (!scannerActive) return;
-  const video = document.getElementById('scannerVideo');
-  const live = scannerStream && scannerStream.getVideoTracks().some(t => t.readyState === 'live');
-  if (live) { if (video.paused) { try { await video.play(); } catch(e){} } return; }
-  try {
-    scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode:{ ideal:'environment' } } });
-    video.srcObject = scannerStream;
-    await video.play();
-    zxingStarted = false; zxingControls = null;
-    startZxing(video);
-  } catch(e) {}
-}
-
-// уменьшаем снимок: 12 Мп с айфона распознаётся медленно и хуже
-function imageToCanvas(img, maxSide, crop) {
-  const sw = crop ? img.naturalWidth * 0.8 : img.naturalWidth;
-  const sh = crop ? img.naturalHeight * 0.5 : img.naturalHeight;
-  const sx = (img.naturalWidth - sw) / 2, sy = (img.naturalHeight - sh) / 2;
-  const scale = Math.min(1, maxSide / Math.max(sw, sh));
-  const c = document.createElement('canvas');
-  c.width = Math.round(sw * scale); c.height = Math.round(sh * scale);
-  c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
-  return c;
-}
-
-document.getElementById('barcodePhotoInput').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  e.target.value = '';
-  if (!file) return;
-  scanStatus('Распознаю снимок…');
-  const url = URL.createObjectURL(file);
-  try {
-    await loadScript(ZXING_URL);
-    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
-    const reader = new window.ZXingBrowser.BrowserMultiFormatReader();
-    // сначала весь кадр, потом центральная полоса крупнее — штрихкод обычно по центру
-    for (const c of [imageToCanvas(img, 1600, false), imageToCanvas(img, 1600, true)]) {
-      try {
-        const res = await reader.decodeFromCanvas(c);
-        if (res) { onBarcodeDetected(res.getText()); return; }
-      } catch (err) { /* пробуем следующий вариант */ }
-    }
-    scanStatus('На снимке штрихкод не виден. Наведите камеру в рамку или введите номер вручную ↓');
-    revivePreview();
-  } catch (err) {
-    scanStatus('Не удалось разобрать снимок: ' + err.message + '. Введите номер вручную ↓');
-    revivePreview();
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-});
-
-// Молчаливая вторая попытка: разбираем полный кадр видео в исходном разрешении.
-// Непрерывный декодер работает по уменьшенной картинке и мелкие штрихкоды пропускает.
-let frameTryTimer = null;
-
-function startFrameFallback() {
-  clearInterval(frameTryTimer);
-  frameTryTimer = setInterval(async () => {
-    if (!scannerActive) { clearInterval(frameTryTimer); return; }
-    const video = document.getElementById('scannerVideo');
-    if (!video || !video.videoWidth || !window.ZXingBrowser) return;
-    try {
-      const c = document.createElement('canvas');
-      c.width = video.videoWidth; c.height = video.videoHeight;
-      c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
-      const reader = new window.ZXingBrowser.BrowserMultiFormatReader();
-      const res = await reader.decodeFromCanvas(c);
-      if (res && scannerActive) onBarcodeDetected(res.getText());
-    } catch(e) { /* в этом кадре не нашлось — пробуем следующий */ }
-  }, 2200);
-}
-
-function closeScanner() {
-  scannerActive = false;
-  clearTimeout(scanWatchdog); clearTimeout(scanHintTimer); clearInterval(frameTryTimer);
-  zxingStarted = false; scanEngine = '';
-  const frame = document.getElementById('scanFrame'); if (frame) frame.style.display = 'none';
-  if (zxingControls) { try { zxingControls.stop(); } catch(e){} zxingControls = null; }
-  if (scannerStream) { scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
-  const v = document.getElementById('scannerVideo');
-  if (v) v.srcObject = null;
-  document.getElementById('scannerOverlay').classList.remove('show');
-}
-
-function onBarcodeDetected(code) {
-  closeScanner();
-  toast('Штрихкод: ' + code);
-  lookupBarcode(code);
-}
-
-async function lookupBarcode(code) {
-  if (!code) return;
-  closeScanner();
-  const cached = state.barcodeCache[code];
-  if (cached) {
-    fillFormFromAuto({ name:cached.name, amount:cached.lastAmount||100, unit:cached.unit, kcal:cached.per1.kcal*(cached.lastAmount||100), prot:cached.per1.prot*(cached.lastAmount||100), fat:cached.per1.fat*(cached.lastAmount||100), carb:cached.per1.carb*(cached.lastAmount||100) }, 'barcode');
-    toast('Найдено в кэше: ' + cached.name);
-    return;
-  }
-  toast('Ищу в базе Open Food Facts...');
-  try {
-    const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`);
-    const data = await res.json();
-    if (data.status === 1 && data.product) {
-      const p = data.product;
-      const n = p.nutriments || {};
-      const per1 = {
-        kcal: (n['energy-kcal_100g']||0)/100,
-        prot: (n['proteins_100g']||0)/100,
-        fat:  (n['fat_100g']||0)/100,
-        carb: (n['carbohydrates_100g']||0)/100,
-      };
-      const name = p.product_name_ru || p.product_name || 'Продукт ' + code;
-      state.barcodeCache[code] = { name, unit:'g', per1, lastAmount:100 };
-      save();
-      fillFormFromAuto({ name, amount:100, unit:'g', kcal:per1.kcal*100, prot:per1.prot*100, fat:per1.fat*100, carb:per1.carb*100 }, 'barcode');
-      toast('Найдено: ' + name);
-    } else {
-      toast('Продукт не найден. Сфотографируйте упаковку или впишите КБЖУ вручную (+)');
-    }
-  } catch(e) {
-    toast('Ошибка сети: проверьте интернет-соединение');
-  }
-}
 
 // ───────────────────────── GEMINI: PHOTO + VOICE ─────────────────────────
 function geminiEndpoint() {
@@ -2776,7 +2489,7 @@ async function authSignUp() {
 }
 
 function freshState() {
-  return { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, barcodeCache:{}, dishes:[], deleted:{}, settings:{geminiKey:'',geminiModel:'gemini-2.5-flash'} };
+  return { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, dishes:[], deleted:{}, settings:{geminiKey:'',geminiModel:'gemini-2.5-flash'} };
 }
 
 async function authSignOut() {
@@ -2841,7 +2554,6 @@ function mergeStates(local, remote) {
     const l = local.products[k], r = out.products[k];
     if (!r || (l.usageCount||0) > (r.usageCount||0)) out.products[k] = l;
   });
-  out.barcodeCache = Object.assign({}, local.barcodeCache || {}, out.barcodeCache || {});
   // ключ Gemini: если в облаке пусто — не теряем локальный
   out.settings = out.settings || {};
   if (!out.settings.geminiKey && local.settings && local.settings.geminiKey) out.settings.geminiKey = local.settings.geminiKey;
@@ -3162,10 +2874,10 @@ let updateReady = false;
 
 // Занята ли пользовательница прямо сейчас? Тогда перезагружать НЕЛЬЗЯ.
 function isBusyNow() {
-  const overlays = ['reviewOverlay','dishOverlay','editOverlay','scannerOverlay','authOverlay','voiceOverlay','portionOverlay'];
+  const overlays = ['reviewOverlay','dishOverlay','editOverlay','authOverlay','voiceOverlay','portionOverlay'];
   if (overlays.some(id => { const el = document.getElementById(id); return el && el.classList.contains('show'); })) return true;
   if (aiBusy || voice.active) return true;
-  const typed = ['foodName','foodAmount','dishName','dishIngText','manualBarcodeInput','weightInput']
+  const typed = ['foodName','foodAmount','dishName','dishIngText','weightInput']
     .some(id => { const el = document.getElementById(id); return el && el.value && String(el.value).trim(); });
   return typed;
 }
