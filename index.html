@@ -1859,25 +1859,21 @@ async function callGeminiInner(parts) {
     contents: [{ parts }],
     generationConfig: { responseMimeType: 'application/json', temperature: 0.2 }
   });
-  const direct = geminiEndpoint();
-  const proxied = 'https://corsproxy.io/?url=' + encodeURIComponent(direct);
+  // ТОЛЬКО напрямую в Google. Сторонний прокси убран: через него уходили
+  // фото еды, текст надиктовки и сам API-ключ — оператор прокси видел бы всё это.
   let data = null, lastErr = '', status = 0;
-  // 1) пробуем напрямую (Gemini поддерживает CORS из браузера), 2) если сеть/CORS — через прокси
-  for (const url of [direct, proxied]) {
-    try {
-      const res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body });
-      const raw = await res.text();
-      let json = null; try { json = JSON.parse(raw); } catch(e) {}
-      if (!res.ok) {
-        status = res.status;
-        lastErr = (json && json.error && json.error.message) || raw.slice(0,160) || res.statusText;
-        if (res.status >= 400 && res.status < 500) break; // битый ключ/модель/квота — прокси не спасёт
-        continue;
-      }
-      data = json; break;
-    } catch(e) {
-      lastErr = e.message || 'сетевая ошибка'; continue; // вероятно CORS — пробуем прокси
+  try {
+    const res = await fetch(geminiEndpoint(), { method:'POST', headers:{'Content-Type':'application/json'}, body });
+    const raw = await res.text();
+    let json = null; try { json = JSON.parse(raw); } catch(e) {}
+    if (!res.ok) {
+      status = res.status;
+      lastErr = (json && json.error && json.error.message) || raw.slice(0,160) || res.statusText;
+    } else {
+      data = json;
     }
+  } catch(e) {
+    lastErr = e.message || 'нет соединения';
   }
   if (!data) { reportGeminiError(status, lastErr); return null; }
   const cand = data.candidates && data.candidates[0];

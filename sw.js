@@ -20,7 +20,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
 
   // Живые данные не кэшируем: Supabase, Gemini, Open Food Facts, прокси
-  if (/supabase\.co|googleapis\.com|openfoodfacts\.org|corsproxy\.io/.test(url.hostname)) return;
+  if (/supabase\.co|googleapis\.com|openfoodfacts\.org/.test(url.hostname)) return;
 
   // Саму страницу берём из сети (чтобы обновления приходили сразу), кэш — запасной вариант
   const isPage = req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html');
