@@ -818,6 +818,7 @@ function ensureDefaults() {
   if (!state.settings.geminiModel) state.settings.geminiModel = 'gemini-2.5-flash';
   if (state.settings.geminiModel === 'gemini-2.0-flash') state.settings.geminiModel = 'gemini-2.5-flash'; // миграция устаревшего дефолта
   if (!state.deleted) state.deleted = {};
+  if (typeof state.profileMt !== 'number') state.profileMt = 0;
   pruneTombs();
   // подстраховка: записи из старых версий могли быть без id — без него удаление/правка не найдут запись
   Object.keys(state.entries).forEach(day => {
@@ -1361,7 +1362,8 @@ function upsertProduct(name, unit, per1, amount) {
     name, unit, per1,
     usageCount: (existing ? existing.usageCount : 0) + 1,
     lastAmount: amount,
-    lastUsed: todayKey()
+    lastUsed: todayKey(),
+    mt: Date.now()
   };
   save();
 }
@@ -2632,8 +2634,9 @@ function saveGoals() {
   state.goals.age = parseInt(document.getElementById('goalAge').value) || null;
   state.goals.gender = document.getElementById('goalGender').value;
   state.goals.activity = parseFloat(document.getElementById('goalActivity').value) || 1.55;
+  state.profileMt = Date.now();
   save(); renderToday(); renderProgress();
-  toast('GOALS_SAVED OK');
+  toast('Цели сохранены');
 }
 
 // поле модели скрыто: нужно редко — если Google переименует модель
@@ -2648,6 +2651,7 @@ function toggleModelField(force) {
 function saveGeminiSettings() {
   state.settings.geminiKey = document.getElementById('geminiKey').value.trim();
   state.settings.geminiModel = document.getElementById('geminiModel').value.trim() || 'gemini-2.5-flash';
+  state.profileMt = Date.now();
   save();
   toast('Ключ Gemini сохранён локально');
 }
@@ -2781,6 +2785,7 @@ async function authSignOut() {
   try { localStorage.removeItem('kaloriya_v3'); localStorage.removeItem('kaloriya_uid'); } catch(e){}
   state = freshState();
   ensureDefaults();
+  resetSyncState();          // снимок чужой сессии не должен влиять на следующий вход
   selectedDate = todayKey();
   renderAll();
 }
@@ -2843,32 +2848,215 @@ function mergeStates(local, remote) {
   return out;
 }
 
-// вход: объединяем локальное с облачным, результат пишем обратно
+// ═══════════ СИНХРОНИЗАЦИЯ ПО ЗАПИСЯМ ═══════════
+// Раньше при каждой правке в облако уходил ВЕСЬ дневник целиком (за 3 года — больше мегабайта).
+// Теперь у каждой записи своя строка в базе, и отправляется только изменившееся.
+
+const TABLES = ['entries','weights','dishes','products'];
+const KEYOF = { entries: r => r.id, weights: r => r.day, dishes: r => r.id, products: r => r.key };
+
+// снимок того, что уже лежит в облаке: ключ -> {mt, del}. По нему считаем, что менялось.
+let snapshot = { entries:{}, weights:{}, dishes:{}, products:{}, profile:0 };
+let maxSeen  = { entries:0, weights:0, dishes:0, products:0, profile:0 };
+
+function resetSyncState() {
+  snapshot = { entries:{}, weights:{}, dishes:{}, products:{}, profile:0 };
+  maxSeen  = { entries:0, weights:0, dishes:0, products:0, profile:0 };
+}
+
+// state (как он в памяти) → плоские строки для базы
+function rowsFromState() {
+  const uid = currentUser.id;
+  const entries = [];
+  Object.keys(state.entries || {}).forEach(day => (state.entries[day] || []).forEach(e => {
+    entries.push({ id:e.id, user_id:uid, day, name:e.name||'', meal:e.meal||'snack',
+      amount:(e.amount ?? null), unit:e.unit||null, kcal:e.kcal||0, prot:e.prot||0, fat:e.fat||0, carb:e.carb||0,
+      source:e.source||null, mt:e.mt||0, deleted:false });
+  }));
+  const weights = (state.weights || []).map(w => ({ user_id:uid, day:w.date, kg:w.kg, mt:w.mt||0, deleted:false }));
+  const dishes  = (state.dishes  || []).map(d => ({ id:d.id, user_id:uid, name:d.name||'', amount:(d.amount ?? null), unit:d.unit||null,
+      kcal:d.kcal||0, prot:d.prot||0, fat:d.fat||0, carb:d.carb||0, ingredients:d.ingredients||[], mt:d.mt||0, deleted:false }));
+  const products = Object.keys(state.products || {}).map(k => { const p = state.products[k];
+      return { user_id:uid, key:k, name:p.name||'', unit:p.unit||null, per1:p.per1||{}, usage_count:p.usageCount||1,
+               last_amount:(p.lastAmount ?? null), last_used:p.lastUsed||null, mt:p.mt||0, deleted:false }; });
+  return { entries, weights, dishes, products };
+}
+
+// строки из базы → в state, побеждает более свежая отметка
+function applyRows(table, rows) {
+  if (!rows || !rows.length) return false;
+  let changed = false;
+  if (table === 'entries') {
+    rows.forEach(r => {
+      const day = String(r.day).slice(0,10);
+      const list = state.entries[day] = state.entries[day] || [];
+      const i = list.findIndex(e => String(e.id) === String(r.id));
+      const mine = i >= 0 ? list[i] : null;
+      if (mine && (mine.mt || 0) > (r.mt || 0)) return;   // наша правка новее — оставляем свою
+      if (r.deleted) { if (i >= 0) { list.splice(i,1); changed = true; } }
+      else {
+        const rec = { id:r.id, mt:r.mt||0, name:r.name, meal:r.meal, amount:r.amount, unit:r.unit,
+                      kcal:r.kcal, prot:r.prot, fat:r.fat, carb:r.carb, source:r.source };
+        if (i >= 0) list[i] = rec; else list.push(rec);
+        changed = true;
+      }
+      if (!list.length) delete state.entries[day];
+    });
+  } else if (table === 'weights') {
+    rows.forEach(r => {
+      const day = String(r.day).slice(0,10);
+      const i = state.weights.findIndex(w => w.date === day);
+      const mine = i >= 0 ? state.weights[i] : null;
+      if (mine && (mine.mt || 0) > (r.mt || 0)) return;
+      if (r.deleted) { if (i >= 0) { state.weights.splice(i,1); changed = true; } }
+      else { const rec = { date:day, kg:r.kg, mt:r.mt||0 }; if (i >= 0) state.weights[i] = rec; else state.weights.push(rec); changed = true; }
+    });
+    state.weights.sort((a,b) => a.date.localeCompare(b.date));
+  } else if (table === 'dishes') {
+    rows.forEach(r => {
+      const i = state.dishes.findIndex(d => String(d.id) === String(r.id));
+      const mine = i >= 0 ? state.dishes[i] : null;
+      if (mine && (mine.mt || 0) > (r.mt || 0)) return;
+      if (r.deleted) { if (i >= 0) { state.dishes.splice(i,1); changed = true; } }
+      else { const rec = { id:r.id, mt:r.mt||0, name:r.name, amount:r.amount, unit:r.unit, kcal:r.kcal,
+                           prot:r.prot, fat:r.fat, carb:r.carb, ingredients:r.ingredients||[] };
+             if (i >= 0) state.dishes[i] = rec; else state.dishes.push(rec); changed = true; }
+    });
+  } else if (table === 'products') {
+    rows.forEach(r => {
+      const mine = state.products[r.key];
+      if (mine && (mine.mt || 0) > (r.mt || 0)) return;
+      if (r.deleted) { if (mine) { delete state.products[r.key]; changed = true; } }
+      else { state.products[r.key] = { name:r.name, unit:r.unit, per1:r.per1||{}, usageCount:r.usage_count||1,
+                                       lastAmount:r.last_amount, lastUsed:r.last_used, mt:r.mt||0 }; changed = true; }
+    });
+  }
+  return changed;
+}
+
+// отправляем ТОЛЬКО изменившиеся записи
+async function pushChanges() {
+  const cur = rowsFromState();
+  for (const t of TABLES) {
+    const snap = snapshot[t];
+    const seen = new Set();
+    const changed = [];
+    cur[t].forEach(r => {
+      const k = String(KEYOF[t](r)); seen.add(k);
+      const s = snap[k];
+      if (!s || s.del || s.mt !== (r.mt || 0)) changed.push(r);
+    });
+    if (changed.length) {
+      const { error } = await sb.from(t).upsert(changed, { onConflict: t === 'entries' || t === 'dishes' ? 'user_id,id' : (t === 'weights' ? 'user_id,day' : 'user_id,key') });
+      if (error) throw error;
+      changed.forEach(r => { snap[String(KEYOF[t](r))] = { mt:r.mt||0, del:false }; });
+    }
+    // то, что исчезло локально, помечаем удалённым в базе (строку не трогаем целиком)
+    const gone = Object.keys(snap).filter(k => !seen.has(k) && !snap[k].del);
+    for (const k of gone) {
+      const mt = Date.now();
+      const q = sb.from(t).update({ deleted:true, mt }).eq('user_id', currentUser.id);
+      const { error } = await (t === 'weights' ? q.eq('day', k) : (t === 'products' ? q.eq('key', k) : q.eq('id', k)));
+      if (error) throw error;
+      snap[k] = { mt, del:true };
+    }
+  }
+  // цели и настройки — одна строка
+  const pmt = state.profileMt || 0;
+  if (pmt !== snapshot.profile) {
+    const { error } = await sb.from('profile').upsert({ user_id: currentUser.id, goals: state.goals||{}, settings: state.settings||{}, mt: pmt }, { onConflict: 'user_id' });
+    if (error) throw error;
+    snapshot.profile = pmt;
+  }
+}
+
+// забираем изменения с сервера: при обычном обновлении — только новее виденного
+async function pullChanges(full) {
+  let touched = false;
+  for (const t of TABLES) {
+    let q = sb.from(t).select('*').eq('user_id', currentUser.id);
+    if (!full && maxSeen[t]) q = q.gt('mt', maxSeen[t]);
+    const { data, error } = await q;
+    if (error) throw error;
+    if (applyRows(t, data)) touched = true;
+    (data || []).forEach(r => {
+      const k = String(KEYOF[t](r));
+      snapshot[t][k] = { mt:r.mt||0, del:!!r.deleted };
+      if ((r.mt||0) > maxSeen[t]) maxSeen[t] = r.mt||0;
+    });
+  }
+  const { data: prof, error: perr } = await sb.from('profile').select('*').eq('user_id', currentUser.id).maybeSingle();
+  if (perr) throw perr;
+  if (prof && (prof.mt||0) > (state.profileMt||0)) {
+    state.goals = prof.goals || state.goals;
+    // ключ Gemini не затираем пустым значением из облака
+    const s = prof.settings || {};
+    state.settings = Object.assign({}, state.settings, s, s.geminiKey ? {} : { geminiKey: state.settings.geminiKey });
+    state.profileMt = prof.mt || 0;
+    touched = true;
+  }
+  if (prof) snapshot.profile = prof.mt || 0;
+  return touched;
+}
+
+// техническую ошибку базы переводим на человеческий
+function syncErrorText(err) {
+  const m = ((err && err.message) || '').toLowerCase();
+  if (!navigator.onLine || m.includes('failed to fetch') || m.includes('networkerror') || m.includes('load failed'))
+    return 'нет сети — записи сохранены на телефоне, отправлю позже';
+  if (m.includes('jwt') || m.includes('token') || m.includes('401') || m.includes('unauthorized'))
+    return 'сеанс истёк — войдите заново, данные на телефоне целы';
+  if (m.includes('foreign key') || m.includes('violates row-level'))
+    return 'аккаунт недоступен — войдите заново, данные на телефоне целы';
+  return 'не удалось сохранить в облако — данные на телефоне целы, попробую ещё раз';
+}
+
 // сеть вернулась — сразу досылаем накопившееся
 window.addEventListener('online', () => { if (dirty && currentUser) syncCloudNow(); });
+
+// Разовый переезд со старого хранилища: забираем общий блок и раскладываем по записям.
+// Старую строку НЕ удаляем — остаётся резервной копией.
+async function migrateFromBlob() {
+  const { data, error } = await sb.from('user_data').select('data').eq('user_id', currentUser.id).maybeSingle();
+  if (error || !data || !data.data || !Object.keys(data.data).length) return false;
+  state = mergeStates(state, data.data);
+  ensureDefaults();
+  // всё, что переехало, считается новым для облака
+  const now = Date.now();
+  Object.keys(state.entries).forEach(d => state.entries[d].forEach(e => { if (!e.mt) e.mt = now; }));
+  state.weights.forEach(w => { if (!w.mt) w.mt = now; });
+  state.dishes.forEach(d => { if (!d.mt) d.mt = now; });
+  Object.keys(state.products).forEach(k => { if (!state.products[k].mt) state.products[k].mt = now; });
+  state.profileMt = now;
+  return true;
+}
 
 async function loadCloud() {
   if (!sb || !currentUser) return;
   setSyncStatus('Загружаю данные…');
-  // если в браузере остался кэш ДРУГОГО пользователя — не подмешиваем его
+  resetSyncState();
+  // кэш ДРУГОГО пользователя не подмешиваем
   try {
     const cachedUid = localStorage.getItem('kaloriya_uid');
-    if (cachedUid && cachedUid !== currentUser.id) { state = freshState(); }
+    if (cachedUid && cachedUid !== currentUser.id) state = freshState();
     localStorage.setItem('kaloriya_uid', currentUser.id);
   } catch(e){}
 
-  let data = null, error = null;
   try {
-    const res = await sb.from('user_data').select('data,updated_at').eq('user_id', currentUser.id).maybeSingle();
-    data = res.data; error = res.error;
-  } catch(e) { error = e; }
-  // данные на устройстве не трогаем — иначе при сбое связи потеряли бы записи
-  if (error) { setSyncStatus('⚠ ' + syncErrorText(error)); renderAll(); return; }
-  const remote = (data && data.data && Object.keys(data.data).length) ? data.data : null;
-  if (remote) state = mergeStates(state, remote);
-  ensureDefaults();
+    await pullChanges(true);
+    const пусто = TABLES.every(t => !Object.keys(snapshot[t]).length);
+    if (пусто) {
+      const переехало = await migrateFromBlob();
+      if (переехало) setSyncStatus('Переношу данные в новое хранилище…');
+    }
+    ensureDefaults();
+    await pushChanges();
+    dirty = false;
+    setSyncStatus('✓ синхронизировано');
+  } catch(e) {
+    setSyncStatus('⚠ ' + syncErrorText(e));
+  }
   try { localStorage.setItem('kaloriya_v3', JSON.stringify(state)); } catch(e){}
-  await syncCloudNow();
   selectedDate = todayKey();
   renderAll();
 }
@@ -2880,46 +3068,31 @@ function syncCloud() {
   syncTimer = setTimeout(syncCloudNow, 800);
 }
 
-// техническую ошибку базы переводим на человеческий — пользователю нужно знать,
-// потеряны ли данные и что делать, а не текст ошибки Postgres
-function syncErrorText(err) {
-  const m = ((err && err.message) || '').toLowerCase();
-  if (!navigator.onLine || m.includes('failed to fetch') || m.includes('networkerror') || m.includes('load failed'))
-    return 'нет сети — записи сохранены на телефоне, отправлю позже';
-  if (m.includes('jwt') || m.includes('token') || m.includes('401') || m.includes('unauthorized'))
-    return 'сеанс истёк — войдите заново, данные на телефоне целы';
-  if (m.includes('foreign key') || m.includes('uuid') || m.includes('violates'))
-    return 'аккаунт недоступен — войдите заново, данные на телефоне целы';
-  return 'не удалось сохранить в облако — данные на телефоне целы, попробую ещё раз';
-}
-
 async function syncCloudNow() {
   if (!sb || !currentUser) return;
-  const stamp = new Date().toISOString();
-  let error = null;
   try {
-    const res = await sb.from('user_data').upsert({ user_id: currentUser.id, data: state, updated_at: stamp });
-    error = res.error;
-  } catch(e) { error = e; }
-  if (!error) { dirty = false; lastRemoteStamp = stamp; setSyncStatus('✓ синхронизировано'); }
-  else { dirty = true; setSyncStatus('⚠ ' + syncErrorText(error)); }   // dirty остаётся — повторим при возврате в приложение
+    await pushChanges();
+    dirty = false;
+    setSyncStatus('✓ синхронизировано');
+  } catch(e) {
+    dirty = true;                       // не сбрасываем — досылаем при возврате в приложение
+    setSyncStatus('⚠ ' + syncErrorText(e));
+  }
 }
 
 // подтянуть изменения, сделанные на другом устройстве
 async function pullCloud() {
   if (!sb || !currentUser || dirty || aiBusy) return;
-  const { data, error } = await sb.from('user_data').select('data,updated_at').eq('user_id', currentUser.id).maybeSingle();
-  if (error || !data) return;
-  if (lastRemoteStamp && data.updated_at <= lastRemoteStamp) return; // нового нет
-  lastRemoteStamp = data.updated_at;
-  if (data.data && Object.keys(data.data).length) {
-    state = data.data; ensureDefaults();
-    try { localStorage.setItem('kaloriya_v3', JSON.stringify(state)); } catch(e){}
-    renderAll();
-    if (document.getElementById('panel-history').classList.contains('active')) renderHistory();
-    if (document.getElementById('panel-weight').classList.contains('active')) renderWeight();
-    setSyncStatus('✓ обновлено с другого устройства');
-  }
+  try {
+    const touched = await pullChanges(false);
+    if (touched) {
+      try { localStorage.setItem('kaloriya_v3', JSON.stringify(state)); } catch(e){}
+      renderAll();
+      if (document.getElementById('panel-history').classList.contains('active')) renderHistory();
+      if (document.getElementById('panel-weight').classList.contains('active')) renderWeight();
+      setSyncStatus('✓ обновлено с другого устройства');
+    }
+  } catch(e) { setSyncStatus('⚠ ' + syncErrorText(e)); }
 }
 
 // ───────────────────────── INIT ─────────────────────────
