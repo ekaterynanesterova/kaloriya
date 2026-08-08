@@ -233,6 +233,14 @@
   .portion-btn:hover { border-color:var(--cyan); color:var(--cyan); background:var(--cyan-dim); }
   .portion-unit { font-size:.72rem; color:var(--text-dim); }
   .servings-label { font-size:.7rem; color:var(--text-dim); white-space:nowrap; }
+  .dish-picker { margin-top:8px; border:1px solid var(--border); background:var(--bg2); padding:8px; }
+  .dp-row { display:flex; align-items:center; gap:8px; padding:6px 4px; border-bottom:1px solid var(--border); }
+  .dp-row:last-child { border-bottom:none; }
+  .dp-name { flex:1; font-size:.78rem; min-width:0; }
+  .dp-sub { font-size:.64rem; color:var(--text-dim); }
+  .dp-amount { width:78px; }
+  .dp-unit { font-size:.66rem; color:var(--text-dim); }
+  .dt-note { display:inline-block; margin-top:4px; font-size:.66rem; color:var(--yellow); }
   .manual-link { font-size:.66rem; color:var(--text-dim); cursor:pointer; text-decoration:underline dotted; white-space:nowrap; }
   .manual-link:hover { color:var(--cyan); }
   /* встроенная запись внутри окна блюда */
@@ -628,11 +636,14 @@
     <input type="hidden" id="dishId">
     <input class="inp" id="dishName" placeholder="название блюда (напр. Горячий бутерброд)" style="width:100%;margin-bottom:8px">
     <div class="input-row" style="margin-bottom:4px">
-      <span class="servings-label">Из этого состава получается</span>
-      <input class="inp" id="dishServings" type="number" min="0.1" step="any" value="1" style="max-width:80px" oninput="renderDishTotal()">
-      <span class="servings-label">порций</span>
+      <span class="servings-label">На выходе получается</span>
+      <input class="inp" id="dishServings" type="number" min="0.1" step="any" value="1" style="max-width:90px" oninput="renderDishTotal()">
+      <select class="inp" id="dishYieldUnit" style="max-width:110px" onchange="renderDishTotal()">
+        <option value="pcs">порций</option>
+        <option value="g">граммов</option>
+      </select>
     </div>
-    <div class="hint" style="margin-bottom:10px">Один бутерброд — 1 порция. Кастрюля супа на пять тарелок — 5 порций.</div>
+    <div class="hint" style="margin-bottom:10px">Считается штуками — ставьте порции (бутерброд, котлета). Готовите массой — взвесьте готовое и укажите граммы: при варке вода выпаривается, поэтому вес с весов точнее, чем сумма ингредиентов.</div>
 
     <div class="section-label" style="margin-top:0"><span class="sl-text">состав</span></div>
     <div class="input-row">
@@ -640,6 +651,8 @@
       <button class="icon-btn" id="dishVoiceBtn" title="Надиктовать состав" onclick="dishVoice()">🎤</button>
       <button class="btn small" onclick="dishParseText()">рассчитать</button>
     </div>
+    <button class="btn-add" onclick="openDishPicker()" id="dishPickerBtn">🍽 добавить своё блюдо в состав</button>
+    <div class="dish-picker" id="dishPicker" style="display:none"></div>
     <div class="hint" style="margin-top:6px" id="dishHint">Перечисли продукты и количество (вписав или надиктовав 🎤) — AI посчитает КБЖУ каждого и сложит. Потом поправь количество, если нужно.</div>
 
     <!-- сюда разворачивается запись голоса, чтобы не открывать окно поверх окна -->
@@ -1049,10 +1062,13 @@ function renderDishes() {
     el.innerHTML = '<div class="empty" style="margin-top:0;width:100%">&gt; пусто — нажмите «+ блюдо», чтобы сохранить готовое блюдо</div>';
     return;
   }
-  // на плашке показываем ОДНУ порцию — её обычно и добавляют
+  // на плашке — одна порция, а для блюд «на вес» калорийность на 100 г
   el.innerHTML = state.dishes.map(d => {
     const s = dishServing(d);
-    return `<button class="quick-chip" onclick="addDish('${d.id}')">🍽 ${escAttr(d.name)}${s.weight ? ' ' + s.weight + 'г' : ''} · <b>${s.kcal}</b></button>`;
+    const подпись = s.unit === 'g'
+      ? `100г · <b>${Math.round(s.kcal*100)}</b>`
+      : `${s.weight ? s.weight + 'г · ' : ''}<b>${s.kcal}</b>`;
+    return `<button class="quick-chip" onclick="addDish('${d.id}')">🍽 ${escAttr(d.name)} ${подпись}</button>`;
   }).join('');
 }
 
@@ -1062,18 +1078,26 @@ function dishWeight(d) {
   return d ? ingredientsWeight(d.ingredients) : null;
 }
 
-// Что представляет собой ОДНА порция блюда: КБЖУ и вес.
-// Рецепт хранится целиком, порций в нём — d.servings (у старых блюд считаем 1).
-function dishServing(d) {
+// Выход рецепта: сколько порций ИЛИ сколько граммов готового получилось.
+// dishServing даёт КБЖУ на ОДНУ единицу выхода (одну порцию или один грамм).
+function dishYield(d) {
   const n = (d && parseFloat(d.servings) > 0) ? parseFloat(d.servings) : 1;
+  const unit = (d && d.yieldUnit === 'g') ? 'g' : 'pcs';
+  return { amount: n, unit };
+}
+
+function dishServing(d) {
+  const y = dishYield(d);
   const w = dishWeight(d);
+  const per = (v) => (v || 0) / y.amount;
   return {
-    servings: n,
-    kcal: Math.round((d.kcal||0) / n),
-    prot: round1((d.prot||0) / n),
-    fat:  round1((d.fat ||0) / n),
-    carb: round1((d.carb||0) / n),
-    weight: w ? Math.round(w / n) : null
+    servings: y.amount, unit: y.unit,
+    // на 1 порцию, либо на 1 грамм готового
+    kcal: y.unit === 'g' ? per(d.kcal) : Math.round(per(d.kcal)),
+    prot: y.unit === 'g' ? per(d.prot) : round1(per(d.prot)),
+    fat:  y.unit === 'g' ? per(d.fat)  : round1(per(d.fat)),
+    carb: y.unit === 'g' ? per(d.carb) : round1(per(d.carb)),
+    weight: y.unit === 'g' ? 1 : (w ? Math.round(w / y.amount) : null)
   };
 }
 
@@ -1094,9 +1118,11 @@ function openPortion(ctx) {
   const round = (v) => Math.round(v*100)/100;
   // для блюда доли считаем от всей порции, для продукта — от привычного количества
   const quick = ctx.kind === 'dish'
-    ? [['½', 0.5], ['1', 1], ['1½', 1.5], ['2', 2]]          // порции блюда
-    : (ctx.unit === 'pcs' ? [['½', 0.5], ['1', 1], ['2', 2], ['3', 3]]
-                          : [['½', u/2], ['×1', u], ['×1½', u*1.5], ['×2', u*2]]);
+    ? [['½', 0.5], ['1', 1], ['1½', 1.5], ['2', 2]]                    // порции блюда
+    : ctx.kind === 'weighed'
+      ? [['50 г', 50], ['100 г', 100], ['150 г', 150], ['200 г', 200]] // блюдо на вес
+      : (ctx.unit === 'pcs' ? [['½', 0.5], ['1', 1], ['2', 2], ['3', 3]]
+                            : [['½', u/2], ['×1', u], ['×1½', u*1.5], ['×2', u*2]]);
   document.getElementById('portionQuick').innerHTML = quick
     .map(([label, val]) => `<button class="portion-btn" onclick="setPortion(${round(val)})">${label}</button>`).join('');
 
@@ -1104,18 +1130,27 @@ function openPortion(ctx) {
   document.getElementById('portionOverlay').classList.add('show');
 }
 
-// Блюдо добавляем ПОРЦИЯМИ: «две тарелки» понятнее, чем «800 грамм»
+// Блюдо добавляем в том виде, в каком оно задано: порциями или граммами
 function addDish(id) {
   const d = state.dishes.find(x => x.id === id);
   if (!d) return;
   const s = dishServing(d);
-  openPortion({
-    kind: 'dish', name: d.name, unit: 'pcs', usual: 1, source: 'dish',
-    per1: { kcal:s.kcal, prot:s.prot, fat:s.fat, carb:s.carb },
-    unitWord: 'порций',
-    totalNote: `Одна порция: <b>${s.kcal}</b> ккал${s.weight ? ` · ${s.weight} г` : ''}`
-      + (s.servings > 1 ? `<br><span class="dt-serving">весь рецепт: ${s.servings} порц. · ${d.kcal} ккал</span>` : '')
-  });
+  if (s.unit === 'g') {
+    openPortion({
+      kind: 'weighed', name: d.name, unit: 'g', usual: 100, source: 'dish',
+      per1: { kcal:s.kcal, prot:s.prot, fat:s.fat, carb:s.carb },
+      totalNote: `В 100 г: <b>${Math.round(s.kcal*100)}</b> ккал`
+        + `<br><span class="dt-serving">весь рецепт: ${Math.round(s.servings)} г · ${d.kcal} ккал</span>`
+    });
+  } else {
+    openPortion({
+      kind: 'dish', name: d.name, unit: 'pcs', usual: 1, source: 'dish',
+      per1: { kcal:s.kcal, prot:s.prot, fat:s.fat, carb:s.carb },
+      unitWord: 'порций',
+      totalNote: `Одна порция: <b>${s.kcal}</b> ккал${s.weight ? ` · ${s.weight} г` : ''}`
+        + (s.servings > 1 ? `<br><span class="dt-serving">весь рецепт: ${s.servings} порц. · ${d.kcal} ккал</span>` : '')
+    });
+  }
 }
 
 // Продукт из «быстрого добавления»
@@ -1177,6 +1212,7 @@ function openDishForm(id) {
   document.getElementById('dishId').value = d ? d.id : '';
   document.getElementById('dishName').value = d ? d.name : '';
   document.getElementById('dishServings').value = (d && parseFloat(d.servings) > 0) ? d.servings : 1;
+  document.getElementById('dishYieldUnit').value = (d && d.yieldUnit === 'g') ? 'g' : 'pcs';
   document.getElementById('dishIngText').value = '';
   let ings = (d && d.ingredients && d.ingredients.length) ? d.ingredients
            : (d && d.kcal ? [{ name:d.name, amount:d.amount||1, unit:d.unit||'pcs', kcal:d.kcal, prot:d.prot||0, fat:d.fat||0, carb:d.carb||0 }] : []);
@@ -1202,6 +1238,7 @@ function clearDishForm() {
   document.getElementById('dishFormTitle').textContent = '// НОВОЕ БЛЮДО';
   ['dishId','dishName','dishIngText'].forEach(i=>document.getElementById(i).value='');
   document.getElementById('dishServings').value = 1;
+  document.getElementById('dishYieldUnit').value = 'pcs';
   renderDishIng();
 }
 
@@ -1213,6 +1250,9 @@ function computeDishTotal() {
 function dishServingsInput() {
   const v = parseFloat((document.getElementById('dishServings') || {}).value);
   return (isFinite(v) && v > 0) ? v : 1;
+}
+function dishYieldUnitInput() {
+  return (document.getElementById('dishYieldUnit') || {}).value === 'g' ? 'g' : 'pcs';
 }
 
 // вес всего рецепта — только если все ингредиенты в граммах/мл
@@ -1230,11 +1270,21 @@ function renderDishTotal() {
   if (!dishIngredients.length) { el.innerHTML = ''; return; }
   const t = computeDishTotal();
   const n = dishServingsInput();
+  const yu = dishYieldUnitInput();
   const w = ingredientsWeight(dishIngredients);
-  const порция = n === 1
-    ? ''
-    : `<br><span class="dt-serving">Одна порция: <b>${Math.round(t.kcal/n)}</b> ккал${w ? ` · ${Math.round(w/n)} г` : ''} · Б ${round1(t.prot/n)} Ж ${round1(t.fat/n)} У ${round1(t.carb/n)}</span>`;
-  el.innerHTML = `Весь рецепт: <b>${t.kcal}</b> ккал${w ? ` · ${w} г` : ''} · Б ${t.prot} · Ж ${t.fat} · У ${t.carb}` + порция;
+
+  let низ = '';
+  if (yu === 'g') {
+    // масса: показываем на 100 г готового — так удобно сверять с этикетками
+    const per100 = (v) => round1(v / n * 100);
+    низ = `<br><span class="dt-serving">На 100 г готового: <b>${Math.round(t.kcal/n*100)}</b> ккал · Б ${per100(t.prot)} Ж ${per100(t.fat)} У ${per100(t.carb)}</span>`;
+    if (w && Math.abs(w - n) > Math.max(5, w*0.03)) {
+      низ += `<br><span class="dt-note">сырьё весило ${w} г, на выходе ${Math.round(n)} г — разницу учёл</span>`;
+    }
+  } else if (n !== 1) {
+    низ = `<br><span class="dt-serving">Одна порция: <b>${Math.round(t.kcal/n)}</b> ккал${w ? ` · ${Math.round(w/n)} г` : ''} · Б ${round1(t.prot/n)} Ж ${round1(t.fat/n)} У ${round1(t.carb/n)}</span>`;
+  }
+  el.innerHTML = `Весь рецепт: <b>${t.kcal}</b> ккал${w ? ` · сырьё ${w} г` : ''} · Б ${t.prot} · Ж ${t.fat} · У ${t.carb}` + низ;
 }
 
 function renderDishIng() {
@@ -1285,6 +1335,46 @@ function addDishIngredients(items) {
   toast(`Добавлено в состав: ${items.length}`);
 }
 
+// Своё блюдо как ингредиент другого: КБЖУ берутся из ТВОЕГО рецепта,
+// а не оцениваются заново — поэтому бутерброд с твоим фаршем считается точно.
+function openDishPicker() {
+  const el = document.getElementById('dishPicker');
+  if (el.style.display === 'block') { el.style.display = 'none'; return; }
+  const доступные = state.dishes.filter(d => d.id !== editingDishId);   // само в себя нельзя
+  if (!доступные.length) {
+    el.innerHTML = '<div class="dp-sub">Сохранённых блюд пока нет — сначала создайте, например, фарш для бутербродов</div>';
+  } else {
+    el.innerHTML = доступные.map(d => {
+      const s = dishServing(d);
+      const наЕдиницу = s.unit === 'g' ? `${Math.round(s.kcal*100)} ккал / 100 г` : `${s.kcal} ккал / порция`;
+      return `<div class="dp-row">
+        <span class="dp-name">${escAttr(d.name)}<br><span class="dp-sub">${наЕдиницу}</span></span>
+        <input class="inp dp-amount" type="number" min="0" step="any" value="${s.unit === 'g' ? 100 : 1}" id="dp-${d.id}">
+        <span class="dp-unit">${s.unit === 'g' ? 'г' : 'порц.'}</span>
+        <button class="btn small" onclick="addDishAsIngredient('${d.id}')">+</button>
+      </div>`;
+    }).join('');
+  }
+  el.style.display = 'block';
+}
+
+function addDishAsIngredient(id) {
+  const d = state.dishes.find(x => x.id === id);
+  if (!d) return;
+  const amount = parseFloat((document.getElementById('dp-' + id) || {}).value) || 0;
+  if (!(amount > 0)) { toast('Укажите количество'); return; }
+  const s = dishServing(d);
+  const per1 = { kcal:s.kcal, prot:s.prot, fat:s.fat, carb:s.carb };
+  dishIngredients.push({
+    name: d.name, amount, unit: s.unit === 'g' ? 'g' : 'pcs',
+    kcal: Math.round(per1.kcal*amount), prot: round1(per1.prot*amount),
+    fat: round1(per1.fat*amount), carb: round1(per1.carb*amount), per1
+  });
+  document.getElementById('dishPicker').style.display = 'none';
+  renderDishIng();
+  toast(`${d.name} · ${amount} ${s.unit === 'g' ? 'г' : 'порц.'} — в состав`);
+}
+
 function dishParseText() {
   const t = document.getElementById('dishIngText').value.trim();
   if (!t) { toast('Впишите состав или надиктуйте 🎤'); return; }
@@ -1315,7 +1405,8 @@ function saveDish() {
     id: editingDishId || ('d-'+Date.now()),
     mt: Date.now(),
     name, amount:1, unit:'pcs',
-    servings: dishServingsInput(),          // сколько порций даёт этот рецепт
+    servings: dishServingsInput(),          // выход рецепта: порций или граммов
+    yieldUnit: dishYieldUnitInput(),
     kcal:t.kcal, prot:t.prot, fat:t.fat, carb:t.carb,
     ingredients: dishIngredients.map(i => ({ name:i.name, amount:i.amount, unit:i.unit, kcal:i.kcal, prot:i.prot, fat:i.fat, carb:i.carb }))
   };
@@ -2632,7 +2723,8 @@ function rowsFromState() {
   const weights = (state.weights || []).map(w => ({ user_id:uid, day:w.date, kg:w.kg, mt:w.mt||0, deleted:false }));
   const dishes  = (state.dishes  || []).map(d => ({ id:d.id, user_id:uid, name:d.name||'', amount:(d.amount ?? null), unit:d.unit||null,
       kcal:d.kcal||0, prot:d.prot||0, fat:d.fat||0, carb:d.carb||0, ingredients:d.ingredients||[],
-      servings:(parseFloat(d.servings) > 0 ? parseFloat(d.servings) : 1), mt:d.mt||0, deleted:false }));
+      servings:(parseFloat(d.servings) > 0 ? parseFloat(d.servings) : 1),
+      yield_unit:(d.yieldUnit === 'g' ? 'g' : 'pcs'), mt:d.mt||0, deleted:false }));
   const products = Object.keys(state.products || {}).map(k => { const p = state.products[k];
       return { user_id:uid, key:k, name:p.name||'', unit:p.unit||null, per1:p.per1||{}, usage_count:p.usageCount||1,
                last_amount:(p.lastAmount ?? null), last_used:p.lastUsed||null, mt:p.mt||0, deleted:false }; });
@@ -2677,7 +2769,8 @@ function applyRows(table, rows) {
       if (r.deleted) { if (i >= 0) { state.dishes.splice(i,1); changed = true; } }
       else { const rec = { id:r.id, mt:r.mt||0, name:r.name, amount:r.amount, unit:r.unit, kcal:r.kcal,
                            prot:r.prot, fat:r.fat, carb:r.carb, ingredients:r.ingredients||[],
-                           servings:(parseFloat(r.servings) > 0 ? parseFloat(r.servings) : 1) };
+                           servings:(parseFloat(r.servings) > 0 ? parseFloat(r.servings) : 1),
+                           yieldUnit:(r.yield_unit === 'g' ? 'g' : 'pcs') };
              if (i >= 0) state.dishes[i] = rec; else state.dishes.push(rec); changed = true; }
     });
   } else if (table === 'products') {
@@ -2708,8 +2801,8 @@ async function pushChanges() {
       const conflict = (t === 'entries' || t === 'dishes') ? 'user_id,id' : (t === 'weights' ? 'user_id,day' : 'user_id,key');
       let { error } = await sb.from(t).upsert(changed, { onConflict: conflict });
       // колонки может ещё не быть в базе (не выполнили ALTER) — не ломаемся, шлём без неё
-      if (error && /servings/i.test(error.message || '')) {
-        const без = changed.map(r => { const c = Object.assign({}, r); delete c.servings; return c; });
+      if (error && /(servings|yield_unit)/i.test(error.message || '')) {
+        const без = changed.map(r => { const c = Object.assign({}, r); delete c.servings; delete c.yield_unit; return c; });
         ({ error } = await sb.from(t).upsert(без, { onConflict: conflict }));
         if (!error) setSyncStatus('✓ синхронизировано (порции пока хранятся только на устройстве)');
       }
