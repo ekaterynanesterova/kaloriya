@@ -753,6 +753,19 @@ const SEED_PRODUCTS = [
 ];
 
 // ───────────────────────── PERSISTENCE ─────────────────────────
+// След удаления: без него старая копия из облака вернула бы удалённую запись.
+// Хранится до 90 дней — этого хватает, чтобы «догнало» любое отставшее устройство.
+const TOMB_TTL = 90 * 24 * 60 * 60 * 1000;
+function markDeleted(key) {
+  if (!state.deleted) state.deleted = {};
+  state.deleted[key] = Date.now();
+}
+function pruneTombs() {
+  if (!state.deleted) { state.deleted = {}; return; }
+  const cutoff = Date.now() - TOMB_TTL;
+  Object.keys(state.deleted).forEach(k => { if ((state.deleted[k] || 0) < cutoff) delete state.deleted[k]; });
+}
+
 let storageWarned = false;
 function save() {
   try {
@@ -804,6 +817,8 @@ function ensureDefaults() {
   if (!state.settings) state.settings = { geminiKey:'', geminiModel:'gemini-2.5-flash' };
   if (!state.settings.geminiModel) state.settings.geminiModel = 'gemini-2.5-flash';
   if (state.settings.geminiModel === 'gemini-2.0-flash') state.settings.geminiModel = 'gemini-2.5-flash'; // миграция устаревшего дефолта
+  if (!state.deleted) state.deleted = {};
+  pruneTombs();
   // подстраховка: записи из старых версий могли быть без id — без него удаление/правка не найдут запись
   Object.keys(state.entries).forEach(day => {
     const list = state.entries[day];
@@ -1277,6 +1292,7 @@ function saveDish() {
   const t = computeDishTotal();
   const dish = {
     id: editingDishId || ('d-'+Date.now()),
+    mt: Date.now(),
     name, amount:1, unit:'pcs',
     kcal:t.kcal, prot:t.prot, fat:t.fat, carb:t.carb,
     ingredients: dishIngredients.map(i => ({ name:i.name, amount:i.amount, unit:i.unit, kcal:i.kcal, prot:i.prot, fat:i.fat, carb:i.carb }))
@@ -1292,6 +1308,7 @@ function saveDish() {
 
 function deleteDish(id) {
   state.dishes = state.dishes.filter(x => x.id !== id);
+  markDeleted('d:' + id);
   if (editingDishId === id) clearDishForm();
   save();
   renderDishes();
@@ -1317,7 +1334,9 @@ function round1(n) { return Math.round(n*10)/10; }
 // ───────────────────────── PRODUCTS DB / AUTOCOMPLETE ─────────────────────────
 function renderProductNames() {
   const dl = document.getElementById('productNames');
-  dl.innerHTML = Object.values(state.products).map(p => `<option value="${escAttr(p.name)}">`).join('');
+  // за годы продуктов накапливаются тысячи — в подсказки отдаём только самые ходовые,
+  // иначе выпадающий список на телефоне становится тяжёлым
+  dl.innerHTML = topProducts(300).map(p => `<option value="${escAttr(p.name)}">`).join('');
 }
 
 function onNameInput() {
@@ -1414,6 +1433,7 @@ function pushEntry(entry) {
   const key = selectedDate; // пишем в выбранный день, а не всегда в сегодня
   if (!state.entries[key]) state.entries[key] = [];
   entry.id = key+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+  entry.mt = Date.now();    // отметка изменения — по ней решается конфликт при синхронизации
   state.entries[key].push(entry);
   save();
   renderToday();
@@ -1477,6 +1497,7 @@ function removeFood(key, id) {
   const { list, i, item } = findEntry(key, id);
   if (i < 0) { toast('Запись уже изменилась — обновите экран'); renderToday(); return; }
   list.splice(i, 1);
+  markDeleted('e:' + id);   // след удаления, иначе запись вернётся из облака
   save(); renderToday();
   if (document.getElementById('panel-history').classList.contains('active')) renderHistory();
   toast('Удалено: ' + item.name);
@@ -1527,6 +1548,7 @@ function saveEditEntry() {
   it.prot = round1(parseFloat(document.getElementById('editProt').value) || 0);
   it.fat  = round1(parseFloat(document.getElementById('editFat').value)  || 0);
   it.carb = round1(parseFloat(document.getElementById('editCarb').value) || 0);
+  it.mt = Date.now();   // правка новее облачной копии — при слиянии победит она
   save();
   closeEditEntry();
   renderToday();
@@ -2268,6 +2290,7 @@ function addEntryNoRender(entry) {
   const key = selectedDate;
   if (!state.entries[key]) state.entries[key] = [];
   entry.id = key+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+  entry.mt = Date.now();
   state.entries[key].push(entry);
 }
 
@@ -2515,7 +2538,7 @@ function addWeight() {
   const date = document.getElementById('weightDate').value || todayKey();
   if (!kg || kg<20 || kg>300) { toast('ERROR: некорректный вес'); return; }
   state.weights = state.weights.filter(e=>e.date!==date);
-  state.weights.push({date,kg});
+  state.weights.push({date, kg, mt: Date.now()});
   state.weights.sort((a,b)=>a.date.localeCompare(b.date));
   save(); renderWeight(); renderToday(); renderProgress();
   document.getElementById('weightInput').value='';
@@ -2527,16 +2550,23 @@ function removeWeight(date) {
   const before = state.weights.length;
   state.weights = state.weights.filter(w => w.date !== date);
   if (state.weights.length === before) { toast('Замер уже изменился — обновите экран'); }
+  else markDeleted('w:' + date);
   save(); renderWeight(); renderProgress(); renderToday();
 }
 
 // ───────────────────────── HISTORY ─────────────────────────
 const openHistoryDays = new Set(); // какие дни раскрыты — чтобы не схлопывались после правки
 
+// История растёт бесконечно: за 3 года это 1100 дней и заметная задержка при открытии.
+// Показываем частями — по 60 дней, остальное по кнопке.
+let historyLimit = 60;
+function showMoreHistory() { historyLimit += 60; renderHistory(); }
+
 function renderHistory() {
-  const keys = Object.keys(state.entries).filter(k => (state.entries[k]||[]).length).sort((a,b)=>b.localeCompare(a));
+  const all = Object.keys(state.entries).filter(k => (state.entries[k]||[]).length).sort((a,b)=>b.localeCompare(a));
+  const keys = all.slice(0, historyLimit);
   const el = document.getElementById('historyList');
-  if (!keys.length) { el.innerHTML='<div class="empty">&gt; история пуста</div>'; return; }
+  if (!all.length) { el.innerHTML='<div class="empty">&gt; история пуста</div>'; return; }
   const mealMap = {}; MEALS.forEach(m=>mealMap[m.key]=m);
   el.innerHTML = keys.map(k => {
     const items = state.entries[k]||[];
@@ -2562,6 +2592,10 @@ function renderHistory() {
       </div>
     </div>`;
   }).join('');
+
+  if (all.length > keys.length) {
+    el.innerHTML += `<button class="btn-add" style="margin-top:12px" onclick="showMoreHistory()">показать ещё дни (${all.length - keys.length} осталось)</button>`;
+  }
 }
 
 function toggleHistory(k) {
@@ -2738,7 +2772,7 @@ async function authSignUp() {
 }
 
 function freshState() {
-  return { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, barcodeCache:{}, dishes:[], settings:{geminiKey:'',geminiModel:'gemini-2.5-flash'} };
+  return { entries:{}, weights:[], goals:{kcal:2000,weight:null,height:null,age:null,gender:'',activity:1.55}, products:{}, barcodeCache:{}, dishes:[], deleted:{}, settings:{geminiKey:'',geminiModel:'gemini-2.5-flash'} };
 }
 
 async function authSignOut() {
@@ -2751,23 +2785,51 @@ async function authSignOut() {
   renderAll();
 }
 
-// Объединение локальных и облачных данных — чтобы правки с офлайн-устройства не затирались
+// Объединение локальных и облачных данных.
+// У каждой записи есть отметка изменения (mt), у каждого удаления — «след» в state.deleted.
+// Поэтому побеждает более СВЕЖАЯ правка, а удаление не отменяется старой копией из облака.
 function mergeStates(local, remote) {
   const out = JSON.parse(JSON.stringify(remote));
-  const sig = (it) => it.id || `${it.name}|${it.meal}|${it.kcal}|${it.amount}`;
-  // записи: объединяем по дням, дубли отсекаем по id
+  const sig = (it) => String(it.id || `${it.name}|${it.meal}|${it.kcal}|${it.amount}`);
+
+  // следы удалений с обоих устройств, при совпадении — более позднее
+  const tomb = Object.assign({}, remote.deleted || {});
+  Object.keys(local.deleted || {}).forEach(k => { tomb[k] = Math.max(tomb[k] || 0, local.deleted[k] || 0); });
+  const alive = (prefix, key, mt) => { const t = tomb[prefix + key]; return !(t && t >= (mt || 0)); };
+
+  // записи: по дню, внутри дня — по id, новее выигрывает
   out.entries = out.entries || {};
-  Object.keys(local.entries || {}).forEach(day => {
-    const seen = new Set((out.entries[day] || []).map(sig));
-    (local.entries[day] || []).forEach(it => { if (!seen.has(sig(it))) { (out.entries[day] = out.entries[day] || []).push(it); seen.add(sig(it)); } });
+  new Set([...Object.keys(local.entries || {}), ...Object.keys(out.entries)]).forEach(day => {
+    const byId = new Map();
+    const add = (list) => (list || []).forEach(it => {
+      const id = sig(it);
+      const prev = byId.get(id);
+      if (!prev || (it.mt || 0) > (prev.mt || 0)) byId.set(id, it);
+    });
+    add(out.entries[day]);
+    add((local.entries || {})[day]);
+    const merged = [...byId.entries()].filter(([id, it]) => alive('e:', id, it.mt)).map(([, it]) => it);
+    if (merged.length) out.entries[day] = merged; else delete out.entries[day];
   });
-  // вес: по дате, локальные добавляем только если такой даты ещё нет
-  const wDates = new Set((out.weights || []).map(w => w.date));
-  (local.weights || []).forEach(w => { if (!wDates.has(w.date)) out.weights.push(w); });
-  out.weights.sort((a,b) => a.date.localeCompare(b.date));
+
+  // вес: по дате
+  const wMap = new Map();
+  const addW = (arr) => (arr || []).forEach(w => {
+    const prev = wMap.get(w.date);
+    if (!prev || (w.mt || 0) > (prev.mt || 0)) wMap.set(w.date, w);
+  });
+  addW(out.weights); addW(local.weights);
+  out.weights = [...wMap.values()].filter(w => alive('w:', w.date, w.mt)).sort((a,b) => a.date.localeCompare(b.date));
+
   // блюда: по id
-  const dIds = new Set((out.dishes || []).map(d => d.id));
-  (local.dishes || []).forEach(d => { if (!dIds.has(d.id)) out.dishes.push(d); });
+  const dMap = new Map();
+  const addD = (arr) => (arr || []).forEach(d => {
+    const prev = dMap.get(d.id);
+    if (!prev || (d.mt || 0) > (prev.mt || 0)) dMap.set(d.id, d);
+  });
+  addD(out.dishes); addD(local.dishes);
+  out.dishes = [...dMap.values()].filter(d => alive('d:', d.id, d.mt));
+  out.deleted = tomb;
   // продукты: берём вариант с большим счётчиком использований
   out.products = out.products || {};
   Object.keys(local.products || {}).forEach(k => {
