@@ -753,8 +753,19 @@ const SEED_PRODUCTS = [
 ];
 
 // ───────────────────────── PERSISTENCE ─────────────────────────
+let storageWarned = false;
 function save() {
-  try { localStorage.setItem('kaloriya_v3', JSON.stringify(state)); } catch(e){}
+  try {
+    localStorage.setItem('kaloriya_v3', JSON.stringify(state));
+    storageWarned = false;
+  } catch(e) {
+    // память телефона кончилась — молчать нельзя, иначе офлайн-записи просто пропадут
+    if (!storageWarned) {
+      storageWarned = true;
+      toast(currentUser ? 'Память браузера переполнена — сохраняю только в облако'
+                        : 'Память браузера переполнена — войдите в аккаунт, чтобы не потерять записи');
+    }
+  }
   if (currentUser) syncCloud();
 }
 
@@ -1020,7 +1031,9 @@ function renderQuickFoods() {
   const top = topProducts(10);
   document.getElementById('quickFoods').innerHTML = top.map(p => {
     const kcal = Math.round(p.per1.kcal * p.lastAmount);
-    return `<button class="quick-chip" onclick="quickAdd('${normKey(p.name)}')">${p.name} ${p.lastAmount}${UNIT_LABEL[p.unit]} · <b>${kcal}</b></button>`;
+    // имя приходит из внешней базы штрихкодов и от AI — экранируем, иначе в страницу
+    // попадёт чужой HTML; ключ кладём в data-атрибут, чтобы апостроф не ломал кнопку
+    return `<button class="quick-chip" data-key="${escAttr(normKey(p.name))}" onclick="quickAdd(this.dataset.key)">${escAttr(p.name)} ${p.lastAmount}${UNIT_LABEL[p.unit]} · <b>${kcal}</b></button>`;
   }).join('');
 }
 
@@ -1304,7 +1317,7 @@ function round1(n) { return Math.round(n*10)/10; }
 // ───────────────────────── PRODUCTS DB / AUTOCOMPLETE ─────────────────────────
 function renderProductNames() {
   const dl = document.getElementById('productNames');
-  dl.innerHTML = Object.values(state.products).map(p => `<option value="${p.name}">`).join('');
+  dl.innerHTML = Object.values(state.products).map(p => `<option value="${escAttr(p.name)}">`).join('');
 }
 
 function onNameInput() {
@@ -1815,12 +1828,15 @@ function normalizeItems(parsed) {
   let arr = Array.isArray(parsed) ? parsed
           : Array.isArray(parsed.items) ? parsed.items
           : (parsed.name ? [parsed] : []);
+  // AI иногда возвращает мусор — отрицательные или нечисловые значения.
+  // Пропустив их, мы бы получили запись, УМЕНЬШАЮЩУЮ дневной итог.
+  const num = (v, dflt) => { const n = parseFloat(v); return (isFinite(n) && n >= 0) ? n : dflt; };
   return arr.filter(x => x && x.name).map(x => {
-    const amount = parseFloat(x.amount) || 1;
-    const kcal = Math.round(parseFloat(x.kcal) || 0);
-    const prot = round1(parseFloat(x.prot) || 0);
-    const fat  = round1(parseFloat(x.fat)  || 0);
-    const carb = round1(parseFloat(x.carb) || 0);
+    const amount = num(x.amount, 0) || 1;
+    const kcal = Math.round(num(x.kcal, 0));
+    const prot = round1(num(x.prot, 0));
+    const fat  = round1(num(x.fat,  0));
+    const carb = round1(num(x.carb, 0));
     const unit = ['g','ml','pcs'].includes(x.unit) ? x.unit : 'g';
     return {
       name: String(x.name).trim(), amount, unit, kcal, prot, fat, carb,
