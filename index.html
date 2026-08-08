@@ -793,6 +793,16 @@ function ensureDefaults() {
   if (!state.settings) state.settings = { geminiKey:'', geminiModel:'gemini-2.5-flash' };
   if (!state.settings.geminiModel) state.settings.geminiModel = 'gemini-2.5-flash';
   if (state.settings.geminiModel === 'gemini-2.0-flash') state.settings.geminiModel = 'gemini-2.5-flash'; // миграция устаревшего дефолта
+  // подстраховка: записи из старых версий могли быть без id — без него удаление/правка не найдут запись
+  Object.keys(state.entries).forEach(day => {
+    const list = state.entries[day];
+    if (!Array.isArray(list) || !list.length) { delete state.entries[day]; return; } // пустые дни не копим
+    const seen = new Set();
+    list.forEach((it, i) => {
+      if (!it.id || seen.has(String(it.id))) it.id = day + '-' + i + '-' + Math.random().toString(36).slice(2,7);
+      seen.add(String(it.id));
+    });
+  });
   if (!state.products || !Object.keys(state.products).length) {
     state.products = {};
     SEED_PRODUCTS.forEach(p => { state.products[normKey(p.name)] = { ...p, usageCount:1, lastUsed:null }; });
@@ -876,8 +886,8 @@ function renderFoodList(items, dayKey) {
         <div class="food-name">${escAttr(it.name)}</div>
         ${it.amount ? `<div class="food-amount">${it.amount} ${UNIT_LABEL[it.unit]||''}</div>` : ''}
         <div class="food-kcal">${it.kcal}</div>
-        <button class="food-del" title="изменить" onclick="openEditEntry('${dayKey}',${idx})" style="color:var(--cyan)">✎</button>
-        <button class="food-del" title="удалить" onclick="removeFood('${dayKey}',${idx})">✕</button>
+        <button class="food-del" title="изменить" onclick="openEditEntry('${dayKey}','${it.id}')" style="color:var(--cyan)">✎</button>
+        <button class="food-del" title="удалить" onclick="removeFood('${dayKey}','${it.id}')">✕</button>
       </div>`).join('');
   });
   list.innerHTML = html;
@@ -1442,21 +1452,31 @@ function resetForm() {
   document.getElementById('autoBadge').style.display = 'none';
 }
 
-function removeFood(key, idx) {
-  if (!state.entries[key]) return;
-  state.entries[key].splice(idx,1);
+// Ищем запись ПО ИДЕНТИФИКАТОРУ, а не по номеру в списке: пока экран открыт,
+// синхронизация с другого устройства может сдвинуть порядок — и удалилось бы не то.
+function findEntry(key, id) {
+  const list = state.entries[key] || [];
+  const i = list.findIndex(e => String(e.id) === String(id));
+  return { list, i, item: i >= 0 ? list[i] : null };
+}
+
+function removeFood(key, id) {
+  const { list, i, item } = findEntry(key, id);
+  if (i < 0) { toast('Запись уже изменилась — обновите экран'); renderToday(); return; }
+  list.splice(i, 1);
   save(); renderToday();
   if (document.getElementById('panel-history').classList.contains('active')) renderHistory();
+  toast('Удалено: ' + item.name);
 }
 
 // ───────────────────────── РЕДАКТИРОВАНИЕ ЗАПИСИ ─────────────────────────
-let editingEntry = { key:null, idx:null, per1:null };
+let editingEntry = { key:null, id:null, per1:null };
 
-function openEditEntry(key, idx) {
-  const it = (state.entries[key]||[])[idx];
-  if (!it) return;
+function openEditEntry(key, id) {
+  const { item: it } = findEntry(key, id);
+  if (!it) { toast('Запись уже изменилась — обновите экран'); return; }
   const amt = it.amount || 1;
-  editingEntry = { key, idx, per1:{ kcal:(it.kcal||0)/amt, prot:(it.prot||0)/amt, fat:(it.fat||0)/amt, carb:(it.carb||0)/amt } };
+  editingEntry = { key, id, per1:{ kcal:(it.kcal||0)/amt, prot:(it.prot||0)/amt, fat:(it.fat||0)/amt, carb:(it.carb||0)/amt } };
   document.getElementById('editName').value = it.name || '';
   document.getElementById('editAmount').value = it.amount || '';
   document.getElementById('editUnit').value = it.unit || 'g';
@@ -1478,12 +1498,12 @@ function editRecalc() {
   document.getElementById('editCarb').value = round1(p.carb*a);
 }
 
-function closeEditEntry() { document.getElementById('editOverlay').classList.remove('show'); editingEntry = { key:null, idx:null, per1:null }; }
+function closeEditEntry() { document.getElementById('editOverlay').classList.remove('show'); editingEntry = { key:null, id:null, per1:null }; }
 
 function saveEditEntry() {
-  const { key, idx } = editingEntry;
-  const it = (state.entries[key]||[])[idx];
-  if (!it) { closeEditEntry(); return; }
+  const { key, id } = editingEntry;
+  const { item: it } = findEntry(key, id);
+  if (!it) { toast('Запись уже изменилась — правка не сохранена'); closeEditEntry(); renderToday(); return; }
   const name = document.getElementById('editName').value.trim();
   if (!name) { toast('ERROR: введите название'); return; }
   it.name = name;
@@ -2343,7 +2363,7 @@ function renderWeight() {
       const cls = diff>0?'delta-up':'delta-down';
       delta = `<span class="weight-delta ${cls}">${diff>0?'+':''}${diff}</span>`;
     }
-    return `<div class="weight-entry"><span>${e.date}</span><span class="weight-val">${e.kg}<span style="font-size:.65rem;color:var(--text-dim)"> кг</span></span>${delta}<button class="food-del" onclick="removeWeight(${entries.length-1-i})">✕</button></div>`;
+    return `<div class="weight-entry"><span>${e.date}</span><span class="weight-val">${e.kg}<span style="font-size:.65rem;color:var(--text-dim)"> кг</span></span>${delta}<button class="food-del" onclick="removeWeight('${e.date}')">✕</button></div>`;
   }).join('');
 }
 
@@ -2486,7 +2506,13 @@ function addWeight() {
   toast(`${kg} кг записано [${date}]`);
 }
 
-function removeWeight(idx) { state.weights.splice(idx,1); save(); renderWeight(); renderProgress(); }
+// по дате, а не по номеру: замер на дату уникален, порядок может измениться синхронизацией
+function removeWeight(date) {
+  const before = state.weights.length;
+  state.weights = state.weights.filter(w => w.date !== date);
+  if (state.weights.length === before) { toast('Замер уже изменился — обновите экран'); }
+  save(); renderWeight(); renderProgress(); renderToday();
+}
 
 // ───────────────────────── HISTORY ─────────────────────────
 const openHistoryDays = new Set(); // какие дни раскрыты — чтобы не схлопывались после правки
@@ -2512,8 +2538,8 @@ function renderHistory() {
           <span><span class="meal-tag">${mealMap[it.meal]?mealMap[it.meal].icon:''}</span>${escAttr(it.name)}${it.amount?` <span style="color:var(--text-dim)">(${it.amount}${UNIT_LABEL[it.unit]||''})</span>`:''}</span>
           <span style="display:flex;align-items:center;gap:6px">
             <span style="color:var(--cyan)">${it.kcal}</span>
-            <button class="food-del" title="изменить" onclick="event.stopPropagation();openEditEntry('${k}',${idx})" style="color:var(--cyan)">✎</button>
-            <button class="food-del" title="удалить" onclick="event.stopPropagation();removeFood('${k}',${idx})">✕</button>
+            <button class="food-del" title="изменить" onclick="event.stopPropagation();openEditEntry('${k}','${it.id}')" style="color:var(--cyan)">✎</button>
+            <button class="food-del" title="удалить" onclick="event.stopPropagation();removeFood('${k}','${it.id}')">✕</button>
           </span>
         </div>`).join('')}
         <button class="btn outline small" style="margin-top:10px" onclick="goToDay('${k}')">открыть этот день</button>
@@ -2740,6 +2766,9 @@ function mergeStates(local, remote) {
 }
 
 // вход: объединяем локальное с облачным, результат пишем обратно
+// сеть вернулась — сразу досылаем накопившееся
+window.addEventListener('online', () => { if (dirty && currentUser) syncCloudNow(); });
+
 async function loadCloud() {
   if (!sb || !currentUser) return;
   setSyncStatus('Загружаю данные…');
@@ -2750,8 +2779,13 @@ async function loadCloud() {
     localStorage.setItem('kaloriya_uid', currentUser.id);
   } catch(e){}
 
-  const { data, error } = await sb.from('user_data').select('data,updated_at').eq('user_id', currentUser.id).maybeSingle();
-  if (error) { setSyncStatus('Ошибка загрузки: ' + error.message); return; }
+  let data = null, error = null;
+  try {
+    const res = await sb.from('user_data').select('data,updated_at').eq('user_id', currentUser.id).maybeSingle();
+    data = res.data; error = res.error;
+  } catch(e) { error = e; }
+  // данные на устройстве не трогаем — иначе при сбое связи потеряли бы записи
+  if (error) { setSyncStatus('⚠ ' + syncErrorText(error)); renderAll(); return; }
   const remote = (data && data.data && Object.keys(data.data).length) ? data.data : null;
   if (remote) state = mergeStates(state, remote);
   ensureDefaults();
@@ -2768,12 +2802,29 @@ function syncCloud() {
   syncTimer = setTimeout(syncCloudNow, 800);
 }
 
+// техническую ошибку базы переводим на человеческий — пользователю нужно знать,
+// потеряны ли данные и что делать, а не текст ошибки Postgres
+function syncErrorText(err) {
+  const m = ((err && err.message) || '').toLowerCase();
+  if (!navigator.onLine || m.includes('failed to fetch') || m.includes('networkerror') || m.includes('load failed'))
+    return 'нет сети — записи сохранены на телефоне, отправлю позже';
+  if (m.includes('jwt') || m.includes('token') || m.includes('401') || m.includes('unauthorized'))
+    return 'сеанс истёк — войдите заново, данные на телефоне целы';
+  if (m.includes('foreign key') || m.includes('uuid') || m.includes('violates'))
+    return 'аккаунт недоступен — войдите заново, данные на телефоне целы';
+  return 'не удалось сохранить в облако — данные на телефоне целы, попробую ещё раз';
+}
+
 async function syncCloudNow() {
   if (!sb || !currentUser) return;
   const stamp = new Date().toISOString();
-  const { error } = await sb.from('user_data').upsert({ user_id: currentUser.id, data: state, updated_at: stamp });
-  if (!error) { dirty = false; lastRemoteStamp = stamp; }
-  setSyncStatus(error ? ('ошибка синхронизации: ' + error.message) : '✓ синхронизировано');
+  let error = null;
+  try {
+    const res = await sb.from('user_data').upsert({ user_id: currentUser.id, data: state, updated_at: stamp });
+    error = res.error;
+  } catch(e) { error = e; }
+  if (!error) { dirty = false; lastRemoteStamp = stamp; setSyncStatus('✓ синхронизировано'); }
+  else { dirty = true; setSyncStatus('⚠ ' + syncErrorText(error)); }   // dirty остаётся — повторим при возврате в приложение
 }
 
 // подтянуть изменения, сделанные на другом устройстве
@@ -2834,6 +2885,8 @@ function onAppFocus() {
   // если приложение висело открытым и наступил новый день — переключаемся на него
   const t = todayKey();
   if (t !== lastKnownToday) { if (selectedDate === lastKnownToday) selectedDate = t; lastKnownToday = t; renderToday(); }
+  // если прошлая отправка не прошла (не было сети) — досылаем, а не ждём следующей правки
+  if (dirty && currentUser) { syncCloudNow(); return; }
   pullCloud();
 }
 document.addEventListener('visibilitychange', onAppFocus);
