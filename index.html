@@ -133,6 +133,7 @@
   .quick-chip { font-family:'Share Tech Mono',monospace; font-size:.67rem; padding:5px 10px; border:1px solid var(--border); background:var(--bg3); cursor:pointer; color:var(--text-dim); transition:all .15s; letter-spacing:.04em; }
   .quick-chip:hover { border-color:var(--cyan); color:var(--cyan); background:var(--cyan-dim); text-shadow:0 0 6px rgba(0,255,224,.4); }
   .quick-chip b { color:var(--green); font-weight:normal; }
+  .quick-chip-more { color:var(--cyan); border-color:rgba(0,255,224,.4); }
 
   /* главная: калории и вес двумя графиками друг под другом в одной плашке */
   .kcal-headline { display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
@@ -316,9 +317,8 @@
     .meal-btn .ml { margin-top:3px; }
     .main-charts { margin-top:10px; gap:6px; }
     .today-footer { margin-top:9px; padding-top:8px; }
-    /* чипы одной строкой со свайпом вбок: раньше 10 штук переносились на 5 строк (~480px) */
-    .quick-foods { flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; -ms-overflow-style:none; padding-bottom:2px; }
-    .quick-foods::-webkit-scrollbar { display:none; width:0; height:0; }
+    /* раньше чипы шли одной строкой со свайпом вбок — на телефоне неудобно искать блюдо;
+       теперь ряд переносится, а лишнее не рендерим вовсе (см. renderDishes/renderQuickFoods) */
     .quick-foods .empty { flex:0 0 auto; }
     /* ✎ и ✕ — крупнее и разнесены, чтобы не промахнуться */
     .food-del { min-width:40px; height:40px; display:inline-flex; align-items:center; justify-content:center; padding:0; font-size:1.05rem; }
@@ -567,6 +567,7 @@
     <div class="overlay-title"><span id="portionTitle">// ПОРЦИЯ</span><span class="overlay-close" onclick="closePortion()">✕ отмена</span></div>
     <div class="portion-info" id="portionInfo"></div>
 
+    <div class="period-switch" id="portionUnitSwitch" style="display:none;margin-bottom:10px"></div>
     <div class="portion-quick" id="portionQuick"></div>
 
     <div class="input-row" style="margin-top:10px">
@@ -649,6 +650,13 @@
     </div>
     <div class="hint" style="margin-bottom:10px">Считается штуками — ставьте порции (бутерброд, котлета). Готовите массой — взвесьте готовое и укажите граммы: при варке вода выпаривается, поэтому вес с весов точнее, чем сумма ингредиентов.</div>
 
+    <div class="input-row" style="margin-bottom:4px">
+      <span class="servings-label">Вес одной порции</span>
+      <input class="inp" id="dishServingWeight" type="number" min="0" step="any" placeholder="авто" style="max-width:90px" oninput="renderDishTotal()">
+      <span class="portion-unit">г</span>
+    </div>
+    <div class="hint" style="margin-bottom:10px" id="dishServingWeightHint">Необязательно. Если указать — при добавлении в дневник можно будет отмечать съеденное и порциями, и граммами (напр. «250 г каши» вместо только «1 порция»).</div>
+
     <div class="section-label" style="margin-top:0"><span class="sl-text">состав</span></div>
     <div class="input-row">
       <input class="inp" id="dishIngText" placeholder="хлеб 50г, майонез 15г, колбаса 40г" style="min-width:150px" onkeydown="if(event.key==='Enter')dishParseText()">
@@ -667,7 +675,8 @@
 
     <button class="btn" onclick="saveDish()" style="width:100%;margin-top:12px">СОХРАНИТЬ БЛЮДО</button>
 
-    <div class="section-label" style="margin-top:22px"><span class="sl-text">сохранённые блюда</span></div>
+    <div class="section-label" style="margin-top:22px" id="dishManagerLabel"><span class="sl-text">сохранённые блюда</span></div>
+    <input class="inp" id="dishSearch" placeholder="поиск по названию…" style="width:100%;margin-bottom:8px" oninput="renderDishManager()">
     <div id="dishManager"></div>
   </div>
 </div>
@@ -1039,8 +1048,12 @@ function topProducts(n=10) {
     .map(x => x.p);
 }
 
+// На телефоне широкий ряд чипов превращался в 5 строк или в горизонтальный свайп —
+// оставляем только самые ходовые, остальное и так доступно через ввод/автоподстановку.
+const QUICK_FOODS_LIMIT = 6;
+
 function renderQuickFoods() {
-  const top = topProducts(10);
+  const top = topProducts(QUICK_FOODS_LIMIT);
   document.getElementById('quickFoods').innerHTML = top.map(p => {
     const kcal = Math.round(p.per1.kcal * p.lastAmount);
     // имя приходит от AI — экранируем, иначе в страницу
@@ -1052,6 +1065,11 @@ function renderQuickFoods() {
 
 
 // ───────────────────────── МОИ БЛЮДА (готовые порции) ─────────────────────────
+// Список блюд со временем растёт, а ряд чипов должен помещаться на экран телефона
+// без свайпа вбок — показываем первые DISH_CHIP_LIMIT, остальное прячем за «ещё →»,
+// которая ведёт в полный список с поиском (см. openDishBrowser).
+const DISH_CHIP_LIMIT = 6;
+
 function renderDishes() {
   const el = document.getElementById('dishList');
   if (!el) return;
@@ -1060,13 +1078,28 @@ function renderDishes() {
     return;
   }
   // на плашке — одна порция, а для блюд «на вес» калорийность на 100 г
-  el.innerHTML = state.dishes.map(d => {
+  const chip = d => {
     const s = dishServing(d);
     const подпись = s.unit === 'g'
       ? `100г · <b>${Math.round(s.kcal*100)}</b>`
       : `${s.weight ? s.weight + 'г · ' : ''}<b>${s.kcal}</b>`;
     return `<button class="quick-chip" onclick="addDish('${d.id}')">🍽 ${escAttr(d.name)} ${подпись}</button>`;
-  }).join('');
+  };
+  const rest = state.dishes.length - DISH_CHIP_LIMIT;
+  el.innerHTML = state.dishes.slice(0, DISH_CHIP_LIMIT).map(chip).join('')
+    + (rest > 0 ? `<button class="quick-chip quick-chip-more" onclick="openDishBrowser()">ещё ${rest} →</button>` : '');
+}
+
+// Прямой вход в полный список блюд с поиском — минуя форму создания нового.
+function openDishBrowser() {
+  openDishForm();
+  const search = document.getElementById('dishSearch');
+  search.value = '';
+  renderDishManager();
+  requestAnimationFrame(() => {
+    document.getElementById('dishManagerLabel').scrollIntoView({ block: 'start' });
+    search.focus();
+  });
 }
 
 // Полный вес блюда — сумма ингредиентов. Считаем только если ВСЕ они в граммах/мл,
@@ -1098,56 +1131,162 @@ function dishServing(d) {
   };
 }
 
+// ─── Блюдо «в граммах» и «в порциях» одновременно ───
+// Идея: одна и та же тарелка каши или голубцов не обязана быть только «1 порцией» —
+// хочется иногда взять 250 г, иногда 275. Раньше единица (порции ИЛИ граммы) выбиралась
+// раз и навсегда при создании блюда. Теперь считаем ОБЕ проекции, когда это возможно,
+// и при добавлении в дневник даём переключатель.
+function dishServingsCount(d) {
+  return (d && parseFloat(d.servings) > 0) ? parseFloat(d.servings) : 1;
+}
+
+// Вес одной порции — либо задан вручную (d.servingWeight), либо считается по составу
+// (сумма ингредиентов в граммах, если она известна, делённая на число порций).
+function dishAutoServingWeight(d) {
+  if (!d || d.yieldUnit === 'g') return null;   // рецепт уже «на вес» — считать вес порции не нужно
+  const w = dishWeight(d);
+  return w ? w / dishServingsCount(d) : null;
+}
+function dishServingWeightOf(d) {
+  const manual = d && parseFloat(d.servingWeight);
+  if (manual > 0) return manual;
+  return dishAutoServingWeight(d);
+}
+
+// «В граммах»: сколько ккал/БЖУ на 1 г готового блюда — и сколько это граммов в одной порции.
+// Работает и для рецептов «на вес» (там это родная единица), и для «на порции» — если известен
+// вес порции (авто по составу или вписан вручную).
+function dishGramBasis(d) {
+  if (!d) return null;
+  if (d.yieldUnit === 'g') {
+    const totalW = parseFloat(d.servings) > 0 ? parseFloat(d.servings) : null;
+    if (!totalW) return null;
+    const per = (v) => (v || 0) / totalW;
+    return { kcal: per(d.kcal), prot: per(d.prot), fat: per(d.fat), carb: per(d.carb), weightPerServing: dishServingWeightOf(d) };
+  }
+  const weightPerServing = dishServingWeightOf(d);
+  if (!weightPerServing) return null;   // ни состав в граммах, ни ручной вес порции не заданы
+  const totalW = dishWeight(d) || weightPerServing * dishServingsCount(d);
+  const per = (v) => (v || 0) / totalW;
+  return { kcal: per(d.kcal), prot: per(d.prot), fat: per(d.fat), carb: per(d.carb), weightPerServing };
+}
+
+// «В порциях»: КБЖУ одной порции. Для рецептов «на порции» — родная единица.
+// Для рецептов «на вес» — доступно, только если вручную указан вес одной порции.
+function dishServingBasis(d) {
+  if (!d) return null;
+  if (d.yieldUnit !== 'g') {
+    const s = dishServing(d);
+    return { kcal: s.kcal, prot: s.prot, fat: s.fat, carb: s.carb, weight: s.weight, count: s.servings };
+  }
+  const gb = dishGramBasis(d);
+  if (!gb || !gb.weightPerServing) return null;
+  const w = gb.weightPerServing;
+  const totalW = parseFloat(d.servings) || 1;
+  return { kcal: Math.round(gb.kcal*w), prot: round1(gb.prot*w), fat: round1(gb.fat*w), carb: round1(gb.carb*w),
+           weight: Math.round(w), count: round1(totalW / w) };
+}
+
 // Одно окно выбора количества и для блюд, и для продуктов из «быстрого добавления»:
 // ничего не попадает в дневник, пока не подтвердишь, сколько именно съедено.
-let portionCtx = null;   // { name, unit, per1, usual, source, totalNote }
+let portionCtx = null;   // { name, unit, per1, usual, source, totalNote, quick, alt, unitLabel }
+
+// Без ctx.quick (продукты из «быстрого добавления») — считаем шорткаты сами.
+// Раньше тут были дроби (½ порции, 1½ и т.п.) — только путали; теперь целые числа
+// или конкретные округлённые граммы/мл, без символов дробей.
+function defaultPortionQuick(ctx) {
+  if (ctx.unit === 'pcs') return [['1', 1], ['2', 2], ['3', 3]];
+  const u = ctx.usual || 1;
+  const lbl = UNIT_LABEL[ctx.unit] || '';
+  return [0.5, 1, 1.5, 2].map(mult => { const v = Math.round(u*mult); return [`${v} ${lbl}`, v]; });
+}
 
 function openPortion(ctx) {
   portionCtx = ctx;
+  portionCtx.mode = 'main';
   document.getElementById('portionTitle').textContent = '// ' + ctx.name.toUpperCase();
-  document.getElementById('portionInfo').innerHTML = ctx.totalNote;
-  document.getElementById('portionAmount').value = ctx.usual;
-  document.getElementById('portionUnit').textContent = ctx.unitWord || UNIT_LABEL[ctx.unit] || ctx.unit;
   document.getElementById('portionMeal').innerHTML =
     MEALS.map(m => `<option value="${m.key}" ${m.key===currentMeal?'selected':''}>${m.icon} ${m.label}</option>`).join('');
-
-  const u = ctx.usual || 1;
-  const round = (v) => Math.round(v*100)/100;
-  // для блюда доли считаем от всей порции, для продукта — от привычного количества
-  const quick = ctx.kind === 'dish'
-    ? [['½', 0.5], ['1', 1], ['1½', 1.5], ['2', 2]]                    // порции блюда
-    : ctx.kind === 'weighed'
-      ? [['50 г', 50], ['100 г', 100], ['150 г', 150], ['200 г', 200]] // блюдо на вес
-      : (ctx.unit === 'pcs' ? [['½', 0.5], ['1', 1], ['2', 2], ['3', 3]]
-                            : [['½', u/2], ['×1', u], ['×1½', u*1.5], ['×2', u*2]]);
-  document.getElementById('portionQuick').innerHTML = quick
-    .map(([label, val]) => `<button class="portion-btn" onclick="setPortion(${round(val)})">${label}</button>`).join('');
-
-  updatePortionPreview();
+  renderPortionUnitSwitch();
+  renderPortionMode();
   document.getElementById('portionOverlay').classList.add('show');
 }
 
-// Блюдо добавляем в том виде, в каком оно задано: порциями или граммами
+// Переключатель «порции / граммы» — только если для блюда известна вторая проекция.
+function renderPortionUnitSwitch() {
+  const el = document.getElementById('portionUnitSwitch');
+  if (!el) return;
+  const c = portionCtx;
+  if (!c || !c.alt) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = 'flex';
+  el.innerHTML = `
+    <button type="button" class="period-btn${c.mode==='main'?' active':''}" onclick="switchPortionMode('main')">${c.unitLabel}</button>
+    <button type="button" class="period-btn${c.mode==='alt'?' active':''}" onclick="switchPortionMode('alt')">${c.alt.unitLabel}</button>`;
+}
+
+// Переключение мутирует сам portionCtx, подставляя поля альтернативного режима —
+// так updatePortionPreview/confirmPortion остаются простыми и не знают о переключателе.
+// Переносим только «содержательные» поля режима — c.unitLabel и c.alt сами
+// остаются на месте, иначе после переключения подписи на кнопках сползутся.
+const PORTION_MODE_FIELDS = ['unit','usual','unitWord','per1','quick','totalNote'];
+function switchPortionMode(mode) {
+  const c = portionCtx;
+  if (!c || !c.alt || mode === c.mode) return;
+  if (mode === 'alt') {
+    c._main = {}; PORTION_MODE_FIELDS.forEach(k => c._main[k] = c[k]);
+    PORTION_MODE_FIELDS.forEach(k => c[k] = c.alt[k]);
+  } else {
+    PORTION_MODE_FIELDS.forEach(k => c[k] = c._main[k]);
+  }
+  c.mode = mode;
+  renderPortionUnitSwitch();
+  renderPortionMode();
+}
+
+function renderPortionMode() {
+  const c = portionCtx; if (!c) return;
+  document.getElementById('portionInfo').innerHTML = c.totalNote;
+  document.getElementById('portionAmount').value = c.usual;
+  document.getElementById('portionUnit').textContent = c.unitWord || UNIT_LABEL[c.unit] || c.unit;
+  const quick = c.quick || defaultPortionQuick(c);
+  document.getElementById('portionQuick').innerHTML = quick
+    .map(([label, val]) => `<button class="portion-btn" onclick="setPortion(${val})">${label}</button>`).join('');
+  updatePortionPreview();
+}
+
+// Блюдо: считаем и «порционную», и «граммовую» проекции — какая из них родная
+// (как задано в рецепте), та и открывается по умолчанию, вторая — по переключателю.
 function addDish(id) {
   const d = state.dishes.find(x => x.id === id);
   if (!d) return;
-  const s = dishServing(d);
-  if (s.unit === 'g') {
-    openPortion({
-      kind: 'weighed', name: d.name, unit: 'g', usual: 100, source: 'dish',
-      per1: { kcal:s.kcal, prot:s.prot, fat:s.fat, carb:s.carb },
-      totalNote: `В 100 г: <b>${Math.round(s.kcal*100)}</b> ккал`
-        + `<br><span class="dt-serving">весь рецепт: ${Math.round(s.servings)} г · ${d.kcal} ккал</span>`
-    });
-  } else {
-    openPortion({
-      kind: 'dish', name: d.name, unit: 'pcs', usual: 1, source: 'dish',
-      per1: { kcal:s.kcal, prot:s.prot, fat:s.fat, carb:s.carb },
-      unitWord: 'порций',
-      totalNote: `Одна порция: <b>${s.kcal}</b> ккал${s.weight ? ` · ${s.weight} г` : ''}`
-        + (s.servings > 1 ? `<br><span class="dt-serving">весь рецепт: ${s.servings} порц. · ${d.kcal} ккал</span>` : '')
-    });
-  }
+
+  const sb = dishServingBasis(d);   // «в порциях» — null, если это рецепт «на вес» без указанного веса порции
+  const gb = dishGramBasis(d);      // «в граммах» — null, если вес не считается ни по составу, ни вручную
+
+  const servingCtx = sb && {
+    unit: 'pcs', usual: 1, unitWord: 'порций', unitLabel: 'порции',
+    per1: { kcal:sb.kcal, prot:sb.prot, fat:sb.fat, carb:sb.carb },
+    quick: [['1', 1], ['2', 2], ['3', 3]],
+    totalNote: `Одна порция: <b>${sb.kcal}</b> ккал${sb.weight ? ` · ${sb.weight} г` : ''}`
+      + (sb.count > 1 ? `<br><span class="dt-serving">весь рецепт: ${round1(sb.count)} порц. · ${d.kcal} ккал</span>` : '')
+  };
+  const gramCtx = gb && {
+    unit: 'g', usual: Math.round(gb.weightPerServing) || 100, unitLabel: 'граммы',
+    per1: { kcal:gb.kcal, prot:gb.prot, fat:gb.fat, carb:gb.carb },
+    quick: [['50 г', 50], ['100 г', 100], ['150 г', 150], ['200 г', 200]],
+    totalNote: `В 100 г: <b>${Math.round(gb.kcal*100)}</b> ккал`
+  };
+
+  const primary = d.yieldUnit === 'g' ? (gramCtx || servingCtx) : (servingCtx || gramCtx);
+  const alt = primary === servingCtx ? gramCtx : servingCtx;
+  if (!primary) { toast('Не могу посчитать порцию — проверьте состав блюда'); return; }
+
+  openPortion({
+    name: d.name, source: 'dish',
+    unit: primary.unit, usual: primary.usual, unitWord: primary.unitWord, unitLabel: primary.unitLabel,
+    per1: primary.per1, quick: primary.quick, totalNote: primary.totalNote,
+    alt: alt || null
+  });
 }
 
 // Продукт из «быстрого добавления»
@@ -1210,6 +1349,7 @@ function openDishForm(id) {
   document.getElementById('dishName').value = d ? d.name : '';
   document.getElementById('dishServings').value = (d && parseFloat(d.servings) > 0) ? d.servings : 1;
   document.getElementById('dishYieldUnit').value = (d && d.yieldUnit === 'g') ? 'g' : 'pcs';
+  document.getElementById('dishServingWeight').value = (d && parseFloat(d.servingWeight) > 0) ? d.servingWeight : '';
   document.getElementById('dishIngText').value = '';
   let ings = (d && d.ingredients && d.ingredients.length) ? d.ingredients
            : (d && d.kcal ? [{ name:d.name, amount:d.amount||1, unit:d.unit||'pcs', kcal:d.kcal, prot:d.prot||0, fat:d.fat||0, carb:d.carb||0 }] : []);
@@ -1226,6 +1366,7 @@ function openDishForm(id) {
 function closeDishForm() {
   if (voice.active && voice.slot === 'dishVoiceSlot') cancelVoice();  // не оставляем запись включённой
   document.getElementById('dishOverlay').classList.remove('show');
+  document.getElementById('dishSearch').value = '';
   editingDishId = null; dishIngredients = [];
 }
 
@@ -1233,7 +1374,7 @@ function clearDishForm() {
   editingDishId = null;
   dishIngredients = [];
   document.getElementById('dishFormTitle').textContent = '// НОВОЕ БЛЮДО';
-  ['dishId','dishName','dishIngText'].forEach(i=>document.getElementById(i).value='');
+  ['dishId','dishName','dishIngText','dishServingWeight'].forEach(i=>document.getElementById(i).value='');
   document.getElementById('dishServings').value = 1;
   document.getElementById('dishYieldUnit').value = 'pcs';
   renderDishIng();
@@ -1251,6 +1392,21 @@ function dishServingsInput() {
 function dishYieldUnitInput() {
   return (document.getElementById('dishYieldUnit') || {}).value === 'g' ? 'g' : 'pcs';
 }
+function dishServingWeightInput() {
+  const v = parseFloat((document.getElementById('dishServingWeight') || {}).value);
+  return v > 0 ? v : null;
+}
+
+// Подсказка «≈ X г» в поле веса порции — считаем по составу (сумма ингредиентов
+// в граммах / число порций); для рецепта «на вес» авто-подсказка не нужна, там граммы — родная единица.
+function renderDishServingWeightHint() {
+  const inp = document.getElementById('dishServingWeight');
+  if (!inp) return;
+  if (dishYieldUnitInput() === 'g') { inp.placeholder = '—'; return; }
+  const w = ingredientsWeight(dishIngredients);
+  const n = dishServingsInput();
+  inp.placeholder = w ? `≈ ${Math.round(w / n)}` : 'вручную';
+}
 
 // вес всего рецепта — только если все ингредиенты в граммах/мл
 function ingredientsWeight(list) {
@@ -1263,6 +1419,7 @@ function ingredientsWeight(list) {
 }
 
 function renderDishTotal() {
+  renderDishServingWeightHint();
   const el = document.getElementById('dishTotal');
   if (!dishIngredients.length) { el.innerHTML = ''; return; }
   const t = computeDishTotal();
@@ -1404,6 +1561,7 @@ function saveDish() {
     name, amount:1, unit:'pcs',
     servings: dishServingsInput(),          // выход рецепта: порций или граммов
     yieldUnit: dishYieldUnitInput(),
+    servingWeight: dishServingWeightInput(), // необязательный вес одной порции, г — открывает второй способ логировать
     kcal:t.kcal, prot:t.prot, fat:t.fat, carb:t.carb,
     ingredients: dishIngredients.map(i => ({ name:i.name, amount:i.amount, unit:i.unit, kcal:i.kcal, prot:i.prot, fat:i.fat, carb:i.carb }))
   };
@@ -1429,7 +1587,10 @@ function renderDishManager() {
   const el = document.getElementById('dishManager');
   if (!el) return;
   if (!state.dishes.length) { el.innerHTML = '<div class="empty" style="margin-top:0">&gt; ещё нет сохранённых блюд</div>'; return; }
-  el.innerHTML = state.dishes.map(d => `
+  const q = normKey((document.getElementById('dishSearch') || {}).value || '');
+  const list = q ? state.dishes.filter(d => normKey(d.name).includes(q)) : state.dishes;
+  if (!list.length) { el.innerHTML = '<div class="empty" style="margin-top:0">&gt; ничего не найдено</div>'; return; }
+  el.innerHTML = list.map(d => `
     <div class="food-item">
       <div class="food-name">${escAttr(d.name)}</div>
       ${d.amount ? `<div class="food-amount">${d.amount} ${UNIT_LABEL[d.unit]||''}</div>` : ''}
@@ -2664,7 +2825,9 @@ function rowsFromState() {
   const dishes  = (state.dishes  || []).map(d => ({ id:d.id, user_id:uid, name:d.name||'', amount:(d.amount ?? null), unit:d.unit||null,
       kcal:d.kcal||0, prot:d.prot||0, fat:d.fat||0, carb:d.carb||0, ingredients:d.ingredients||[],
       servings:(parseFloat(d.servings) > 0 ? parseFloat(d.servings) : 1),
-      yield_unit:(d.yieldUnit === 'g' ? 'g' : 'pcs'), mt:d.mt||0, deleted:false }));
+      yield_unit:(d.yieldUnit === 'g' ? 'g' : 'pcs'),
+      serving_weight:(parseFloat(d.servingWeight) > 0 ? parseFloat(d.servingWeight) : null),
+      mt:d.mt||0, deleted:false }));
   const products = Object.keys(state.products || {}).map(k => { const p = state.products[k];
       return { user_id:uid, key:k, name:p.name||'', unit:p.unit||null, per1:p.per1||{}, usage_count:p.usageCount||1,
                last_amount:(p.lastAmount ?? null), last_used:p.lastUsed||null, mt:p.mt||0, deleted:false }; });
@@ -2710,7 +2873,8 @@ function applyRows(table, rows) {
       else { const rec = { id:r.id, mt:r.mt||0, name:r.name, amount:r.amount, unit:r.unit, kcal:r.kcal,
                            prot:r.prot, fat:r.fat, carb:r.carb, ingredients:r.ingredients||[],
                            servings:(parseFloat(r.servings) > 0 ? parseFloat(r.servings) : 1),
-                           yieldUnit:(r.yield_unit === 'g' ? 'g' : 'pcs') };
+                           yieldUnit:(r.yield_unit === 'g' ? 'g' : 'pcs'),
+                           servingWeight:(parseFloat(r.serving_weight) > 0 ? parseFloat(r.serving_weight) : null) };
              if (i >= 0) state.dishes[i] = rec; else state.dishes.push(rec); changed = true; }
     });
   } else if (table === 'products') {
@@ -2741,8 +2905,8 @@ async function pushChanges() {
       const conflict = (t === 'entries' || t === 'dishes') ? 'user_id,id' : (t === 'weights' ? 'user_id,day' : 'user_id,key');
       let { error } = await sb.from(t).upsert(changed, { onConflict: conflict });
       // колонки может ещё не быть в базе (не выполнили ALTER) — не ломаемся, шлём без неё
-      if (error && /(servings|yield_unit)/i.test(error.message || '')) {
-        const без = changed.map(r => { const c = Object.assign({}, r); delete c.servings; delete c.yield_unit; return c; });
+      if (error && /(servings|yield_unit|serving_weight)/i.test(error.message || '')) {
+        const без = changed.map(r => { const c = Object.assign({}, r); delete c.servings; delete c.yield_unit; delete c.serving_weight; return c; });
         ({ error } = await sb.from(t).upsert(без, { onConflict: conflict }));
         if (!error) setSyncStatus('✓ синхронизировано (порции пока хранятся только на устройстве)');
       }
