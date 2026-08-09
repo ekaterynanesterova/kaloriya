@@ -232,6 +232,13 @@
   .portion-btn { flex:1; font-family:'Share Tech Mono',monospace; font-size:.82rem; padding:10px 6px; border:1px solid var(--border); background:var(--bg2); color:var(--text); cursor:pointer; transition:all .15s; }
   .portion-btn:hover { border-color:var(--cyan); color:var(--cyan); background:var(--cyan-dim); }
   .portion-unit { font-size:.72rem; color:var(--text-dim); }
+  /* единое поле ввода еды */
+  .eat-box { margin-top:16px; }
+  .eat-row { display:flex; gap:8px; align-items:center; }
+  .eat-input { flex:1; min-width:0; font-size:.85rem; padding:12px; }
+  .eat-hint { font-size:.64rem; color:var(--text-dim); margin-top:5px; line-height:1.4; }
+  .eat-box .btn.primary { margin-top:8px; padding:12px 20px; }
+  .eat-manual { text-align:center; margin-top:6px; }
   .servings-label { font-size:.7rem; color:var(--text-dim); white-space:nowrap; }
   .dish-picker { margin-top:8px; border:1px solid var(--border); background:var(--bg2); padding:8px; }
   .dp-row { display:flex; align-items:center; gap:8px; padding:6px 4px; border-bottom:1px solid var(--border); }
@@ -393,29 +400,18 @@
     <!-- MEAL BAR -->
     <div class="meal-bar" id="mealBar"></div>
 
-    <div class="input-row" style="margin-top:16px">
-      <input class="inp" id="foodName" list="productNames" placeholder="название продукта" oninput="onNameInput()" style="min-width:160px">
-      <datalist id="productNames"></datalist>
-      <button class="icon-btn" title="Распознать по фото (Gemini)" onclick="openPhotoCapture()">📷</button>
-      <button class="icon-btn" id="voiceBtn" title="Надиктовать (Gemini)" onclick="startVoice()">🎤</button>
-    </div>
-    <div class="input-row" style="margin-top:8px">
-      <input class="inp" id="foodAmount" type="number" placeholder="количество" min="0" step="any" oninput="updatePreview()" style="max-width:130px">
-      <select class="inp" id="foodUnit" onchange="updatePreview()" style="max-width:90px">
-        <option value="g">г</option>
-        <option value="ml">мл</option>
-        <option value="pcs">шт</option>
-      </select>
-      <select class="inp" id="formMeal" style="max-width:140px"></select>
-    </div>
-
-    <div class="preview-row" id="previewRow">
-      <span><span class="pv-kcal" id="pvKcal">0</span> ккал · Б <span id="pvProt">0</span>г Ж <span id="pvFat">0</span>г У <span id="pvCarb">0</span>г <span class="auto-badge" id="autoBadge" style="display:none">авто</span></span>
-      <span class="manual-link" onclick="openManual()">указать КБЖУ вручную</span>
-    </div>
-
-    <div class="input-row" style="margin-top:12px">
-      <button class="btn" onclick="addFood()" style="flex:0">+ ДОБАВИТЬ</button>
+    <!-- Один способ ввода: пишешь как говоришь, разбирает AI -->
+    <div class="eat-box">
+      <div class="eat-row">
+        <input class="inp eat-input" id="foodName" list="productNames" autocomplete="off"
+               placeholder="что вы съели?" onkeydown="if(event.key==='Enter')analyzeTyped()" oninput="onEatInput()">
+        <datalist id="productNames"></datalist>
+        <button class="icon-btn" title="Сфотографировать еду" onclick="openPhotoCapture()">📷</button>
+        <button class="icon-btn" id="voiceBtn" title="Надиктовать" onclick="startVoice()">🎤</button>
+      </div>
+      <button class="btn primary" id="eatBtn" onclick="analyzeTyped()" disabled>ДОБАВИТЬ</button>
+      <div class="eat-hint" id="eatHint">Например: «морковка и два яйца». Количество можно не указывать.</div>
+      <div class="eat-manual"><span class="manual-link" onclick="openManual()">ввести КБЖУ вручную</span></div>
     </div>
 
     <div class="section-label">
@@ -546,14 +542,22 @@
 <div class="overlay" id="manualOverlay">
   <div class="overlay-box" style="max-width:420px">
     <div class="overlay-title"><span>// КБЖУ ВРУЧНУЮ</span><span class="overlay-close" onclick="closeManual()">✕ отмена</span></div>
-    <div class="hint" style="margin-bottom:10px">Для случая, когда состав известен с упаковки, а распознавать нечего. Значения — на всю порцию, которую вписали в форме.</div>
-    <div class="manual-grid">
-      <div><label>Ккал</label><input class="inp" id="manKcal" type="number" min="0" oninput="onManualEdit()"></div>
-      <div><label>Белки г</label><input class="inp" id="manProt" type="number" min="0" oninput="onManualEdit()"></div>
-      <div><label>Жиры г</label><input class="inp" id="manFat" type="number" min="0" oninput="onManualEdit()"></div>
-      <div><label>Углев г</label><input class="inp" id="manCarb" type="number" min="0" oninput="onManualEdit()"></div>
+    <div class="hint" style="margin-bottom:10px">Когда КБЖУ известны с упаковки и распознавать нечего. Значения — на всё указанное количество.</div>
+    <input class="inp" id="manName" placeholder="название" style="width:100%;margin-bottom:8px">
+    <div class="input-row" style="margin-bottom:8px">
+      <input class="inp" id="manAmount" type="number" min="0" step="any" placeholder="сколько" style="max-width:110px">
+      <select class="inp" id="manUnit" style="max-width:80px">
+        <option value="g">г</option><option value="ml">мл</option><option value="pcs">шт</option>
+      </select>
+      <select class="inp" id="manMeal" style="flex:1"></select>
     </div>
-    <button class="btn primary" onclick="applyManual()">ПРИМЕНИТЬ</button>
+    <div class="manual-grid">
+      <div><label>Ккал</label><input class="inp" id="manKcal" type="number" min="0"></div>
+      <div><label>Белки г</label><input class="inp" id="manProt" type="number" min="0"></div>
+      <div><label>Жиры г</label><input class="inp" id="manFat" type="number" min="0"></div>
+      <div><label>Углев г</label><input class="inp" id="manCarb" type="number" min="0"></div>
+    </div>
+    <button class="btn primary" onclick="applyManual()">ДОБАВИТЬ В ДНЕВНИК</button>
   </div>
 </div>
 
@@ -709,8 +713,6 @@ let state = {
 };
 
 let currentMeal = autoMeal();
-let activeAuto = { per1:null, source:null }; // current auto-fill state for the add-food form
-let manualMode = false;
 let scannerStream = null, scannerActive = false;
 
 function autoMeal() {
@@ -855,11 +857,6 @@ function renderMealBar() {
       <div class="mk">${sub}</div>
     </div>`;
   }).join('');
-  // sync the form's meal select
-  const sel = document.getElementById('formMeal');
-  if (sel) {
-    sel.innerHTML = MEALS.map(m => `<option value="${m.key}" ${m.key===currentMeal?'selected':''}>${m.icon} ${m.label}</option>`).join('');
-  }
 }
 
 function setCurrentMeal(key) {
@@ -1452,18 +1449,35 @@ function renderProductNames() {
   dl.innerHTML = topProducts(300).map(p => `<option value="${escAttr(p.name)}">`).join('');
 }
 
-function onNameInput() {
-  const name = document.getElementById('foodName').value.trim();
-  const p = state.products[normKey(name)];
+// Знакомый продукт добавляем мгновенно и бесплатно, всё остальное разбирает AI
+function onEatInput() {
+  const txt = document.getElementById('foodName').value.trim();
+  const btn = document.getElementById('eatBtn');
+  const hint = document.getElementById('eatHint');
+  btn.disabled = !txt;
+  const p = txt && state.products[normKey(txt)];
   if (p) {
-    activeAuto = { per1:p.per1, source:'product' };
-    document.getElementById('foodAmount').value = p.lastAmount;
-    document.getElementById('foodUnit').value = p.unit;
-    manualMode = false;
+    btn.textContent = 'ДОБАВИТЬ';
+    hint.textContent = `Знакомый продукт: обычно ${p.lastAmount} ${UNIT_LABEL[p.unit]||''} · ${Math.round((p.per1.kcal||0)*p.lastAmount)} ккал — спрошу количество.`;
   } else {
-    activeAuto = { per1:null, source:null };
+    btn.textContent = txt ? 'РАЗОБРАТЬ И ДОБАВИТЬ' : 'ДОБАВИТЬ';
+    hint.textContent = 'Например: «морковка и два яйца». Количество можно не указывать.';
   }
-  updatePreview();
+}
+
+async function analyzeTyped() {
+  const txt = document.getElementById('foodName').value.trim();
+  if (!txt) return;
+  const p = state.products[normKey(txt)];
+  if (p) {                       // точное совпадение — открываем выбор количества, без обращения к AI
+    document.getElementById('foodName').value = '';
+    onEatInput();
+    quickAdd(normKey(txt));
+    return;
+  }
+  document.getElementById('foodName').value = '';
+  onEatInput();
+  await recognizeFood(buildFoodParts(txt, []));
 }
 
 function upsertProduct(name, unit, per1, amount) {
@@ -1479,72 +1493,39 @@ function upsertProduct(name, unit, per1, amount) {
   save();
 }
 
-// ───────────────────────── PREVIEW / FORM LOGIC ─────────────────────────
-function currentAmount() { return parseFloat(document.getElementById('foodAmount').value) || 0; }
-
-function updatePreview() {
-  const amount = currentAmount();
-  const badge = document.getElementById('autoBadge');
-  if (manualMode) { badge.style.display = 'none'; return; }
-  if (activeAuto.per1 && amount > 0) {
-    const kcal = Math.round(activeAuto.per1.kcal*amount);
-    const prot = round1(activeAuto.per1.prot*amount);
-    const fat  = round1(activeAuto.per1.fat*amount);
-    const carb = round1(activeAuto.per1.carb*amount);
-    setPreview(kcal, prot, fat, carb);
-    badge.style.display = 'inline-block';
-  } else {
-    setPreview(0,0,0,0);
-    badge.style.display = 'none';
-  }
-}
-
-function setPreview(k,p,f,c) {
-  document.getElementById('pvKcal').textContent = k;
-  document.getElementById('pvProt').textContent = p;
-  document.getElementById('pvFat').textContent = f;
-  document.getElementById('pvCarb').textContent = c;
-}
-
+// ───────────────────────── РУЧНОЙ ВВОД КБЖУ (редкий случай) ─────────────────────────
 function openManual() {
-  // подставляем то, что уже посчитано, чтобы правку было от чего начать
-  document.getElementById('manKcal').value = document.getElementById('pvKcal').textContent;
-  document.getElementById('manProt').value = document.getElementById('pvProt').textContent;
-  document.getElementById('manFat').value  = document.getElementById('pvFat').textContent;
-  document.getElementById('manCarb').value = document.getElementById('pvCarb').textContent;
+  const txt = (document.getElementById('foodName') || {}).value || '';
+  document.getElementById('manName').value = txt.trim();
+  document.getElementById('manAmount').value = 100;
+  document.getElementById('manUnit').value = 'g';
+  document.getElementById('manMeal').innerHTML =
+    MEALS.map(m => `<option value="${m.key}" ${m.key===currentMeal?'selected':''}>${m.icon} ${m.label}</option>`).join('');
+  ['manKcal','manProt','manFat','manCarb'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('manualOverlay').classList.add('show');
 }
 
 function closeManual() { document.getElementById('manualOverlay').classList.remove('show'); }
 
 function applyManual() {
-  const k = parseFloat(document.getElementById('manKcal').value) || 0;
-  if (!k) { toast('Укажите хотя бы калории'); return; }
-  manualMode = true;
-  document.getElementById('autoBadge').style.display = 'none';
-  onManualEdit();
+  const name = document.getElementById('manName').value.trim();
+  const amount = parseFloat(document.getElementById('manAmount').value) || 0;
+  const unit = document.getElementById('manUnit').value;
+  const kcal = Math.round(parseFloat(document.getElementById('manKcal').value) || 0);
+  if (!name) { toast('Введите название'); return; }
+  if (!amount) { toast('Укажите количество'); return; }
+  if (!kcal) { toast('Укажите хотя бы калории'); return; }
+  const prot = round1(parseFloat(document.getElementById('manProt').value) || 0);
+  const fat  = round1(parseFloat(document.getElementById('manFat').value)  || 0);
+  const carb = round1(parseFloat(document.getElementById('manCarb').value) || 0);
+
+  pushEntry({ name, meal: document.getElementById('manMeal').value || currentMeal,
+              amount, unit, kcal, prot, fat, carb, source:'manual' });
+  upsertProduct(name, unit, { kcal:kcal/amount, prot:prot/amount, fat:fat/amount, carb:carb/amount }, amount);
+  document.getElementById('foodName').value = '';
+  onEatInput();
   closeManual();
-  toast('КБЖУ задано вручную — жмите «Добавить»');
-}
-
-function onManualEdit() {
-  setPreview(
-    parseFloat(document.getElementById('manKcal').value) || 0,
-    parseFloat(document.getElementById('manProt').value) || 0,
-    parseFloat(document.getElementById('manFat').value)  || 0,
-    parseFloat(document.getElementById('manCarb').value) || 0
-  );
-}
-
-function fillFormFromAuto(result, source) {
-  // result: {name, amount, unit, kcal, prot, fat, carb}
-  document.getElementById('foodName').value = result.name || '';
-  document.getElementById('foodAmount').value = result.amount || 100;
-  document.getElementById('foodUnit').value = result.unit || 'g';
-  const amount = result.amount || 1;
-  activeAuto = { per1: { kcal:(result.kcal||0)/amount, prot:(result.prot||0)/amount, fat:(result.fat||0)/amount, carb:(result.carb||0)/amount }, source };
-  manualMode = false;
-  updatePreview();
+  toast(`${name} · ${kcal} ккал`);
 }
 
 function pushEntry(entry) {
@@ -1557,50 +1538,9 @@ function pushEntry(entry) {
   renderToday();
 }
 
-function addFood() {
-  const name = document.getElementById('foodName').value.trim();
-  const amount = currentAmount();
-  const unit = document.getElementById('foodUnit').value;
-  if (!name) { toast('ERROR: введите название продукта'); return; }
-  if (!amount) { toast('ERROR: укажите количество'); return; }
-
-  let kcal, prot, fat, carb;
-  if (manualMode) {
-    kcal = parseFloat(document.getElementById('manKcal').value) || 0;
-    prot = parseFloat(document.getElementById('manProt').value) || 0;
-    fat  = parseFloat(document.getElementById('manFat').value)  || 0;
-    carb = parseFloat(document.getElementById('manCarb').value) || 0;
-    if (!kcal) { toast('ERROR: укажите хотя бы калории'); return; }
-  } else if (activeAuto.per1) {
-    kcal = Math.round(activeAuto.per1.kcal*amount);
-    prot = round1(activeAuto.per1.prot*amount);
-    fat  = round1(activeAuto.per1.fat*amount);
-    carb = round1(activeAuto.per1.carb*amount);
-  } else {
-    toast('Нет данных КБЖУ — сфотографируйте, надиктуйте или укажите вручную');
-    openManual();
-    return;
-  }
-
-  pushEntry({ name, meal:currentMeal, amount, unit, kcal, prot, fat, carb, source: manualMode?'manual':(activeAuto.source||'manual') });
-
-  // learn: derive per1 from this entry for future suggestions
-  const per1 = { kcal:kcal/amount, prot:prot/amount, fat:fat/amount, carb:carb/amount };
-  upsertProduct(name, unit, per1, amount);
-
-  toast(`${name} добавлен · ${kcal} ккал`);
-  resetForm();
-}
-
 function resetForm() {
-  document.getElementById('foodName').value = '';
-  document.getElementById('foodAmount').value = '';
-  document.getElementById('foodUnit').value = 'g';
-  activeAuto = { per1:null, source:null };
-  manualMode = false;
-  ['manKcal','manProt','manFat','manCarb'].forEach(id => document.getElementById(id).value='');
-  setPreview(0,0,0,0);
-  document.getElementById('autoBadge').style.display = 'none';
+  const f = document.getElementById('foodName');
+  if (f) { f.value = ''; onEatInput(); }
 }
 
 // Ищем запись ПО ИДЕНТИФИКАТОРУ, а не по номеру в списке: пока экран открыт,
@@ -3023,7 +2963,7 @@ function isBusyNow() {
   const overlays = ['reviewOverlay','dishOverlay','editOverlay','authOverlay','voiceOverlay','portionOverlay'];
   if (overlays.some(id => { const el = document.getElementById(id); return el && el.classList.contains('show'); })) return true;
   if (aiBusy || voice.active) return true;
-  const typed = ['foodName','foodAmount','dishName','dishIngText','weightInput']
+  const typed = ['foodName','dishName','dishIngText','weightInput','manName']
     .some(id => { const el = document.getElementById(id); return el && el.value && String(el.value).trim(); });
   return typed;
 }
