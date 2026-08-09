@@ -2904,11 +2904,20 @@ async function pushChanges() {
     if (changed.length) {
       const conflict = (t === 'entries' || t === 'dishes') ? 'user_id,id' : (t === 'weights' ? 'user_id,day' : 'user_id,key');
       let { error } = await sb.from(t).upsert(changed, { onConflict: conflict });
-      // колонки может ещё не быть в базе (не выполнили ALTER) — не ломаемся, шлём без неё
-      if (error && /(servings|yield_unit|serving_weight)/i.test(error.message || '')) {
-        const без = changed.map(r => { const c = Object.assign({}, r); delete c.servings; delete c.yield_unit; delete c.serving_weight; return c; });
-        ({ error } = await sb.from(t).upsert(без, { onConflict: conflict }));
-        if (!error) setSyncStatus('✓ синхронизировано (порции пока хранятся только на устройстве)');
+      // Какой-то колонки может ещё не быть в базе. Убираем ТОЛЬКО ту, на которую ругаются,
+      // и пробуем снова — иначе из-за одной недостающей терялись бы и остальные новые поля.
+      const пропущенные = [];
+      let строки = changed;
+      for (let i = 0; i < 4 && error; i++) {
+        const m = /'([a-z_]+)' column|column ["']?[a-z_]*\.?([a-z_]+)["']? does not exist/i.exec(error.message || '');
+        const колонка = m && (m[1] || m[2]);
+        if (!колонка || !(колонка in (строки[0] || {}))) break;
+        пропущенные.push(колонка);
+        строки = строки.map(r => { const c = Object.assign({}, r); delete c[колонка]; return c; });
+        ({ error } = await sb.from(t).upsert(строки, { onConflict: conflict }));
+      }
+      if (!error && пропущенные.length) {
+        setSyncStatus('✓ синхронизировано (в облаке нет колонок: ' + пропущенные.join(', ') + ')');
       }
       if (error) throw error;
       changed.forEach(r => { snap[String(KEYOF[t](r))] = { mt:r.mt||0, del:false }; });
