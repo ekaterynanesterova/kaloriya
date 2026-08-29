@@ -2701,14 +2701,30 @@ function showAuth(show) {
 }
 function setSyncStatus(msg) { const el = document.getElementById('syncStatus'); if (el) el.textContent = msg; }
 
+// Ошибку входа переводим на человеческий: «Failed to fetch» выглядит как неверный пароль,
+// хотя на деле сервер просто недоступен — и человек зря перебирает пароли.
+function authErrorText(err) {
+  const m = ((err && err.message) || '').toLowerCase();
+  if (!navigator.onLine) return 'Нет интернета на устройстве';
+  if (m.includes('failed to fetch') || m.includes('networkerror') || m.includes('load failed'))
+    return 'Сервер недоступен — база на паузе или нет связи. Пароль тут ни при чём, попробуйте позже';
+  if (m.includes('invalid login')) return 'Неверная почта или пароль';
+  if (m.includes('email not confirmed')) return 'Почта не подтверждена — проверьте письмо';
+  if (m.includes('rate limit') || m.includes('too many')) return 'Слишком много попыток — подождите минуту';
+  if (m.includes('already registered') || m.includes('already been registered')) return 'Такая почта уже зарегистрирована — просто войдите';
+  return (err && err.message) ? err.message : 'Не получилось';
+}
+
 async function authSignIn() {
   if (!sb) { toast('Supabase не загрузился — проверьте интернет'); return; }
   const email = document.getElementById('authEmail').value.trim();
   const pass = document.getElementById('authPass').value;
   if (!email || !pass) { document.getElementById('authStatus').textContent = 'Введите почту и пароль'; return; }
   document.getElementById('authStatus').textContent = 'Вхожу…';
-  const { error } = await sb.auth.signInWithPassword({ email, password: pass });
-  if (error) document.getElementById('authStatus').textContent = 'Ошибка: ' + error.message;
+  let error = null;
+  try { ({ error } = await sb.auth.signInWithPassword({ email, password: pass })); }
+  catch(e) { error = e; }
+  if (error) document.getElementById('authStatus').textContent = authErrorText(error);
   // успех подхватит onAuthStateChange
 }
 
@@ -2718,8 +2734,10 @@ async function authSignUp() {
   const pass = document.getElementById('authPass').value;
   if (!email || pass.length < 6) { document.getElementById('authStatus').textContent = 'Почта + пароль минимум 6 символов'; return; }
   document.getElementById('authStatus').textContent = 'Создаю аккаунт…';
-  const { data, error } = await sb.auth.signUp({ email, password: pass });
-  if (error) { document.getElementById('authStatus').textContent = 'Ошибка: ' + error.message; return; }
+  let data = null, error = null;
+  try { ({ data, error } = await sb.auth.signUp({ email, password: pass })); }
+  catch(e) { error = e; }
+  if (error) { document.getElementById('authStatus').textContent = authErrorText(error); return; }
   if (data.session) document.getElementById('authStatus').textContent = 'Аккаунт создан!';
   else document.getElementById('authStatus').textContent = 'Проверьте почту и подтвердите регистрацию, затем войдите.';
 }
