@@ -267,6 +267,8 @@
   .btn.primary:hover:not(:disabled) { background:#5CFFEC; box-shadow:0 0 26px rgba(0,255,224,.5); }
   .btn.primary:disabled { background:var(--bg3); color:var(--text-dim); box-shadow:none; border-color:var(--border); }
   .voice-photos { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .voice-photo-row { display:flex; gap:8px; }
+  .voice-photo-row .btn-add { flex:1; margin-top:0; }
   .voice-photos:empty { display:none; }
   .vp-item { position:relative; width:64px; height:64px; border:1px solid var(--border); overflow:hidden; }
   .vp-item img { width:100%; height:100%; object-fit:cover; display:block; }
@@ -603,7 +605,10 @@
       <div class="voice-edit-hint">Текст можно исправить прямо здесь — сотрите лишнее или допишите</div>
 
       <div class="voice-photos" id="voicePhotos"></div>
-      <button class="btn-add" onclick="addVoicePhoto()" id="voicePhotoBtn">📷 Добавить фото</button>
+      <div class="voice-photo-row">
+        <button class="btn-add" onclick="addVoicePhoto()" id="voicePhotoBtn">📷 Камера</button>
+        <button class="btn-add" onclick="addVoicePhotoFromGallery()" id="voiceGalleryBtn">🖼 Из галереи</button>
+      </div>
 
       <div class="hint" style="margin-top:8px" id="voiceHint">Говорите свободно, можно с паузами. Фото упаковки помогает точнее посчитать — с него читается таблица пищевой ценности.</div>
       <button class="btn primary" id="voiceDoneBtn" onclick="finishVoice()">ГОТОВО — РАСПОЗНАТЬ</button>
@@ -701,6 +706,7 @@
 
 <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none">
 <input type="file" id="voicePhotoInput" accept="image/*" capture="environment" style="display:none">
+<input type="file" id="voiceGalleryInput" accept="image/*" multiple style="display:none">
 
 <script>
 // ───────────────────────── STATE ─────────────────────────
@@ -1965,7 +1971,11 @@ function fileToScaledImage(file, maxSide, quality) {
   });
 }
 
+// Камера — для готового блюда прямо сейчас. Галерея — для случая «сфоткала,
+// когда готовила, а записываю позже»: тот же file input, но без capture,
+// поэтому телефон предлагает выбрать из уже снятых фото (и сразу несколько).
 function addVoicePhoto() { document.getElementById('voicePhotoInput').click(); }
+function addVoicePhotoFromGallery() { document.getElementById('voiceGalleryInput').click(); }
 
 function renderVoicePhotos() {
   const el = document.getElementById('voicePhotos');
@@ -1973,25 +1983,37 @@ function renderVoicePhotos() {
   el.innerHTML = voice.photos.map((p, i) =>
     `<div class="vp-item"><img src="${p.preview}" alt=""><button class="vp-del" onclick="removeVoicePhoto(${i})" title="убрать">✕</button></div>`
   ).join('');
-  const btn = document.getElementById('voicePhotoBtn');
-  if (btn) {
-    btn.disabled = voice.photos.length >= MAX_VOICE_PHOTOS;
-    btn.textContent = voice.photos.length ? `📷 Ещё фото (${voice.photos.length})` : '📷 Добавить фото';
-  }
+  const full = voice.photos.length >= MAX_VOICE_PHOTOS;
+  const camBtn = document.getElementById('voicePhotoBtn');
+  if (camBtn) { camBtn.disabled = full; camBtn.textContent = voice.photos.length ? `📷 Ещё (${voice.photos.length})` : '📷 Камера'; }
+  const galBtn = document.getElementById('voiceGalleryBtn');
+  if (galBtn) galBtn.disabled = full;
   renderTranscript();
 }
 
 function removeVoicePhoto(i) { voice.photos.splice(i, 1); renderVoicePhotos(); }
 
-document.getElementById('voicePhotoInput').addEventListener('change', async (e) => {
-  const files = Array.from(e.target.files || []);
-  e.target.value = '';
+async function handleVoicePhotoFiles(fileList) {
+  const files = Array.from(fileList || []);
   for (const f of files) {
-    if (voice.photos.length >= MAX_VOICE_PHOTOS) break;
+    if (voice.photos.length >= MAX_VOICE_PHOTOS) { toast(`Можно приложить не больше ${MAX_VOICE_PHOTOS} фото`); break; }
     try { voice.photos.push(await fileToScaledImage(f, 1280, 0.85)); }
     catch (err) { toast('Не удалось добавить фото: ' + err.message); }
   }
   renderVoicePhotos();
+}
+
+// ВАЖНО: копируем FileList в массив ДО сброса value — обнуление value
+// у file-инпута опустошает и сам FileList, на который мы иначе ссылались бы.
+document.getElementById('voicePhotoInput').addEventListener('change', (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  handleVoicePhotoFiles(files);
+});
+document.getElementById('voiceGalleryInput').addEventListener('change', (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  handleVoicePhotoFiles(files);
 });
 
 // Панель записи одна на всё приложение и переезжает туда, где нужна:
